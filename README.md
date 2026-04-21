@@ -8,12 +8,27 @@ prefixes each segment with a timestamp.
 
 ## Install
 
+### Homebrew (recommended)
+
 ```sh
-uv tool install ytt        # recommended
-pipx install ytt           # alternative
+brew install marcelocantos/tap/ytt
 ```
 
-Either puts a `ytt` command on your PATH in an isolated environment.
+### From the GitHub release
+
+Each release attaches an sdist and wheel. Install with `pipx` or `uv`:
+
+```sh
+pipx install https://github.com/marcelocantos/ytt/releases/download/v0.1.0/ytt-0.1.0-py3-none-any.whl
+# or
+uv tool install https://github.com/marcelocantos/ytt/releases/download/v0.1.0/ytt-0.1.0-py3-none-any.whl
+```
+
+### From source
+
+```sh
+pipx install git+https://github.com/marcelocantos/ytt
+```
 
 ## Usage
 
