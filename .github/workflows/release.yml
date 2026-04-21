@@ -1,9 +1,16 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  release:
+    types: [published]
+  # Manual re-run — useful to regenerate the tap formula against an
+  # existing release (e.g., after fixing the generator script).
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to rebuild (e.g., v0.1.0)"
+        required: true
+        type: string
 
 jobs:
   build:
@@ -11,14 +18,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.13"
 
       - name: Verify tag matches pyproject version
         run: |
-          tag="${GITHUB_REF#refs/tags/v}"
+          tag="${{ github.event.release.tag_name || inputs.tag }}"
+          tag="${tag#v}"
           pyver="$(python -c 'import tomllib,pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
           echo "tag=$tag pyver=$pyver"
           if [[ "$tag" != "$pyver" ]]; then
@@ -43,7 +53,7 @@ jobs:
           path: dist/
 
   github-release:
-    name: Attach artefacts to GitHub release
+    name: Attach artefacts to release
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -57,6 +67,47 @@ jobs:
       - name: Upload to existing release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
-          tag="${GITHUB_REF#refs/tags/}"
-          gh release upload "$tag" dist/* --repo "${{ github.repository }}" --clobber
+          gh release upload "$TAG" dist/* --repo "${{ github.repository }}" --clobber
+
+  homebrew:
+    name: Update Homebrew tap
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Generate formula
+        id: gen
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          python scripts/brew-formula-gen.py "$TAG" > ytt.rb
+          echo "::group::Generated formula"
+          cat ytt.rb
+          echo "::endgroup::"
+
+      - name: Push formula to tap
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/marcelocantos/homebrew-tap.git" tap
+          cp ytt.rb tap/Formula/ytt.rb
+          cd tap
+          git add Formula/ytt.rb
+          if git diff --staged --quiet; then
+            echo "Formula unchanged — nothing to commit."
+            exit 0
+          fi
+          git commit -m "chore: brew formula update for ytt ${TAG}"
+          git push
