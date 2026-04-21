@@ -76,9 +76,11 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      # Check out the default branch (not the tag). The generator script is
+      # CI infrastructure that evolves independently of release source; we
+      # always want the latest version. The $TAG parameter tells the script
+      # which release tarball to resolve.
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.release.tag_name || inputs.tag }}
 
       - uses: actions/setup-python@v5
         with:
