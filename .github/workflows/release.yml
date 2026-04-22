@@ -3,19 +3,26 @@ name: Release
 on:
   release:
     types: [published]
-  # Manual re-run — useful to regenerate the tap formula against an
-  # existing release (e.g., after fixing the generator script).
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to rebuild (e.g., v0.1.0)"
+        description: "Release tag to rebuild (e.g., v0.2.0)"
         required: true
         type: string
 
 jobs:
   build:
-    name: Build distribution
-    runs-on: ubuntu-latest
+    name: Build ${{ matrix.target }}
+    strategy:
+      matrix:
+        include:
+          - os: macos-14
+            target: darwin-arm64
+          - os: ubuntu-latest
+            target: linux-amd64
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,91 +32,64 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Verify tag matches pyproject version
+      - name: Verify tag matches __version__
+        shell: bash
         run: |
           tag="${{ github.event.release.tag_name || inputs.tag }}"
           tag="${tag#v}"
-          pyver="$(python -c 'import tomllib,pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          pyver="$(python -c 'import re,pathlib; print(re.search(r"__version__ = \"([^\"]+)\"", pathlib.Path("ytt.py").read_text()).group(1))')"
           echo "tag=$tag pyver=$pyver"
           if [[ "$tag" != "$pyver" ]]; then
-            echo "::error::tag ($tag) != pyproject version ($pyver)"
+            echo "::error::tag ($tag) != ytt.__version__ ($pyver)"
             exit 1
           fi
 
-      - name: Build sdist and wheel
+      - name: Install deps + PyInstaller
         run: |
-          pip install build
-          python -m build
+          pip install pyinstaller .
 
-      - name: Check artefacts
+      - name: Build binary
+        shell: bash
         run: |
-          pip install twine
-          twine check dist/*
+          pyinstaller --onefile --name ytt --strip ytt.py
+          ./dist/ytt --version
 
-      - name: Upload artefacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: dist/
+      - name: Package tarball
+        shell: bash
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          version="${TAG#v}"
+          name="ytt-${version}-${{ matrix.target }}"
+          mkdir -p "pkg/${name}"
+          cp dist/ytt "pkg/${name}/ytt"
+          tar -C pkg -czf "${name}.tar.gz" "${name}"
+          shasum -a 256 "${name}.tar.gz"
 
-  github-release:
-    name: Attach artefacts to release
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download artefacts
-        uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist/
-      - name: Upload to existing release
+      - name: Upload to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        shell: bash
         run: |
-          gh release upload "$TAG" dist/* --repo "${{ github.repository }}" --clobber
+          gh release upload "$TAG" ytt-*.tar.gz --repo "${{ github.repository }}" --clobber
 
   homebrew:
     name: Update Homebrew tap
     needs: build
     runs-on: ubuntu-latest
     steps:
-      # Check out the default branch (not the tag). The generator script is
-      # CI infrastructure that evolves independently of release source; we
-      # always want the latest version. The $TAG parameter tells the script
-      # which release tarball to resolve.
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+      - uses: Justintime50/homebrew-releaser@v3
         with:
-          python-version: "3.13"
-
-      - name: Generate formula
-        id: gen
-        env:
-          TAG: ${{ github.event.release.tag_name || inputs.tag }}
-        run: |
-          python scripts/brew-formula-gen.py "$TAG" > ytt.rb
-          echo "::group::Generated formula"
-          cat ytt.rb
-          echo "::endgroup::"
-
-      - name: Push formula to tap
-        env:
-          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          TAG: ${{ github.event.release.tag_name || inputs.tag }}
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/marcelocantos/homebrew-tap.git" tap
-          cp ytt.rb tap/Formula/ytt.rb
-          cd tap
-          git add Formula/ytt.rb
-          if git diff --staged --quiet; then
-            echo "Formula unchanged — nothing to commit."
-            exit 0
-          fi
-          git commit -m "chore: brew formula update for ytt ${TAG}"
-          git push
+          homebrew_owner: marcelocantos
+          homebrew_tap: homebrew-tap
+          formula_folder: Formula
+          github_token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          version: ${{ github.event.release.tag_name || inputs.tag }}
+          install: 'bin.install "ytt"'
+          test: 'assert_match "ytt #{version}", shell_output("#{bin}/ytt --version")'
+          target_darwin_arm64: true
+          target_linux_amd64: true
+          target_linux_arm64: true
+          skip_checksum: true
+          update_readme_table: true

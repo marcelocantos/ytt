@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import argparse
 import sys
-from importlib.metadata import PackageNotFoundError, version
 
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import CouldNotRetrieveTranscript
+
+__version__ = "0.2.0"
 
 
 AGENT_HELP = """\
@@ -74,13 +75,6 @@ def fetch_transcript(video_id: str, timestamps: bool) -> str:
     return " ".join(item.text for item in transcript)
 
 
-def get_version() -> str:
-    try:
-        return version("ytt")
-    except PackageNotFoundError:
-        return "0.0.0+unknown"
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ytt",
@@ -100,7 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="version",
-        version=f"ytt {get_version()}",
+        version=f"ytt {__version__}",
     )
     parser.add_argument(
         "--help-agent",

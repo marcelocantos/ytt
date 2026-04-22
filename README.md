@@ -16,15 +16,14 @@ brew install marcelocantos/tap/ytt
 
 ### From the GitHub release
 
-Each release attaches an sdist and wheel. Install with `pipx` or `uv`:
-
-```sh
-pipx install https://github.com/marcelocantos/ytt/releases/download/v0.1.0/ytt-0.1.0-py3-none-any.whl
-# or
-uv tool install https://github.com/marcelocantos/ytt/releases/download/v0.1.0/ytt-0.1.0-py3-none-any.whl
-```
+Each release attaches standalone binaries for macOS arm64, Linux x86_64,
+and Linux arm64. Download the tarball matching your platform from the
+[releases page](https://github.com/marcelocantos/ytt/releases/latest),
+extract, and put `ytt` on your PATH.
 
 ### From source
+
+Requires Python 3.10+:
 
 ```sh
 pipx install git+https://github.com/marcelocantos/ytt
@@ -79,10 +78,11 @@ Errors are written to stderr, one line per failure, in the form
 
 ## Requirements
 
-- Python 3.10+
 - Internet access to YouTube (the underlying library scrapes YouTube's
   caption endpoints; YouTube occasionally changes these and breaks
   transcript fetching until the library catches up)
+- Python 3.10+ only if installing from source; the Homebrew and
+  GitHub-release downloads bundle their own interpreter
 
 ## License
 
