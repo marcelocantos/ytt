@@ -27,3 +27,30 @@ maintenance activities. Append-only — newest entries at the bottom.
     network-independent test of transcript parsing
   - Formula deps will drift over time — there's no automation to refresh
     `resource` blocks on youtube-transcript-api updates
+
+## 2026-04-22 — /release v0.2.0 (via session follow-up)
+
+- **Commit**: `714b46c`
+- **Outcome**: Switched distribution from a Python-venv formula
+  (`virtualenv_install_with_resources`) to a PyInstaller single-binary per
+  platform. `brew install` time dropped from ~60s to ~5s. release.yml now
+  matches the mainstream `/release` skill pattern (matrix build →
+  `<project>-<version>-<os>-<arch>.tar.gz` → homebrew-releaser). The
+  custom `scripts/brew-formula-gen.py` and custom tap-push job are gone.
+  The "Python is different" framing from the /open-source run turned out
+  to be wrong: once the artefact is a binary, /release's binary path
+  applies verbatim. `HOMEBREW_TAP_TOKEN` was already set from the
+  previous run.
+- **Deferred**:
+  - PyInstaller `--onefile` startup cost (~4s per invocation) — addressed
+    in v0.3.0 below
+
+## 2026-04-22 — /release v0.3.0 (via session follow-up)
+
+- **Commit**: `a55de4a`
+- **Outcome**: Switched PyInstaller from `--onefile` to `--onedir` to fix
+  v0.2.0's 4-second cold-start cost. Startup is now ~100ms hot, ~900ms
+  cold — comparable to a native Go/Rust binary. Tarball now contains the
+  binary plus `_internal/` at the root; the Homebrew formula moves both
+  into libexec and symlinks the binary into bin. Total install time from
+  `brew upgrade` is ~5s.
