@@ -13,6 +13,8 @@ on:
 jobs:
   build:
     name: Build ${{ matrix.target }}
+    permissions:
+      contents: write
     strategy:
       matrix:
         include:
