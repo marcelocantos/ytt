@@ -53,8 +53,8 @@ jobs:
       - name: Build binary
         shell: bash
         run: |
-          pyinstaller --onefile --name ytt --strip ytt.py
-          ./dist/ytt --version
+          pyinstaller --onedir --name ytt ytt.py
+          ./dist/ytt/ytt --version
 
       - name: Package tarball
         shell: bash
@@ -63,9 +63,11 @@ jobs:
         run: |
           version="${TAG#v}"
           name="ytt-${version}-${{ matrix.target }}"
-          mkdir -p "pkg/${name}"
-          cp dist/ytt "pkg/${name}/ytt"
-          tar -C pkg -czf "${name}.tar.gz" "${name}"
+          # Tarball contents are the *contents* of dist/ytt — the `ytt`
+          # binary at the root plus its `_internal` deps directory. The
+          # brew formula moves everything into libexec and symlinks the
+          # binary into bin (see homebrew-releaser `install:` below).
+          tar -C dist/ytt -czf "${name}.tar.gz" .
           shasum -a 256 "${name}.tar.gz"
 
       - name: Upload to release
@@ -88,7 +90,9 @@ jobs:
           formula_folder: Formula
           github_token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           version: ${{ github.event.release.tag_name || inputs.tag }}
-          install: 'bin.install "ytt"'
+          install: |
+            libexec.install Dir["*"]
+            bin.install_symlink libexec/"ytt"
           test: 'assert_match "ytt #{version}", shell_output("#{bin}/ytt --version")'
           target_darwin_arm64: true
           target_linux_amd64: true
