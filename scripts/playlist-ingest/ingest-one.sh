@@ -47,7 +47,17 @@ Produce a detailed synopsis and key takeaways following the /ytt skill's
 output format (multi-paragraph synopsis covering full content in logical
 order, then a bulleted Key Takeaways list).
 
-Write the result to $DIR/synopsis.md as markdown, with this exact structure:
+Choose a topic-based filename slug for the output. Requirements:
+
+- 2–6 words, kebab-case, lowercase ASCII, ending in ".md"
+- Describes the actual subject matter — not the literal video title
+  (titles are often clickbaity). Read like a useful node label in an
+  Obsidian graph view; reading the slug alone should hint at the topic.
+- Favour the substantive topic over personalities/sensationalism.
+- Must NOT begin with "transcript" (reserved).
+
+Write the synopsis to \$DIR/<slug>.md (where \$DIR is $DIR), with this
+exact structure:
 
   # $TITLE
 
@@ -68,7 +78,8 @@ Write the result to $DIR/synopsis.md as markdown, with this exact structure:
 The TL;DR line is consumed by an index generator — keep it on a single
 line, prefixed exactly with "**TL;DR**: ".
 
-Do not write anything else to disk. Reply with just "done" when finished.
+Do not write anything else to disk. Reply with just the slug filename
+(e.g. "claude-desktop-project-features.md") when finished — nothing else.
 EOF
 )
 
@@ -80,8 +91,12 @@ if ! printf '%s\n' "$PROMPT" | claude -p \
     exit 1
 fi
 
-if [[ ! -s "$DIR/synopsis.md" ]]; then
-    log "synopsis.md missing or empty"
+# Locate the synopsis file Claude wrote (any *.md other than transcript*).
+SYNOPSIS=$(find "$DIR" -maxdepth 1 -type f -name '*.md' \
+    ! -name 'transcript*' -print -quit)
+
+if [[ -z "$SYNOPSIS" || ! -s "$SYNOPSIS" ]]; then
+    log "synopsis file missing or empty"
     exit 1
 fi
 

@@ -49,8 +49,13 @@ format_date() {
 # Collect rows: tab-separated (sort key, formatted row).
 ROWS=$(
     for dir in "$ROOT"/*/; do
-        [[ -f "$dir/synopsis.md" ]] || continue
+        # The synopsis is the (single) *.md file in $dir that isn't a
+        # transcript. Filenames are topic-based slugs chosen at ingest.
+        synopsis=$(find "$dir" -maxdepth 1 -type f -name '*.md' \
+            ! -name 'transcript*' -print -quit)
+        [[ -n "$synopsis" && -s "$synopsis" ]] || continue
         id="$(basename "$dir")"
+        slug_file="$(basename "$synopsis")"
         meta="$dir/meta.json"
         if [[ -f "$meta" ]]; then
             title=$(jq -r '.title    // "(unknown)"' "$meta")
@@ -61,7 +66,7 @@ ROWS=$(
         else
             title="$id"; channel="–"; updated=""; dur=0; url=""
         fi
-        tldr=$(extract_tldr "$dir/synopsis.md")
+        tldr=$(extract_tldr "$synopsis")
         # Escape pipes so they don't break the markdown table.
         title_esc=${title//|/\\|}
         channel_esc=${channel//|/\\|}
@@ -69,8 +74,9 @@ ROWS=$(
         date_str=$(format_date "$updated")
         dur_str=$(format_duration "$dur")
         link_url=${url:-https://www.youtube.com/watch?v=$id}
-        row=$(printf '| %s | [%s](%s/synopsis.md) ([yt](%s)) | %s | %s | %s |' \
-            "$date_str" "$title_esc" "$id" "$link_url" "$channel_esc" "$dur_str" "$tldr_esc")
+        row=$(printf '| %s | [%s](%s/%s) ([yt](%s)) | %s | %s | %s |' \
+            "$date_str" "$title_esc" "$id" "$slug_file" "$link_url" \
+            "$channel_esc" "$dur_str" "$tldr_esc")
         # Sort key: upload_date if present (YYYYMMDD sorts naturally), else "00000000".
         printf '%s\t%s\n' "${updated:-00000000}" "$row"
     done | sort -r
