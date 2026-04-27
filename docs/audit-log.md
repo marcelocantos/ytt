@@ -54,3 +54,24 @@ maintenance activities. Append-only — newest entries at the bottom.
   binary plus `_internal/` at the root; the Homebrew formula moves both
   into libexec and symlinks the binary into bin. Total install time from
   `brew upgrade` is ~5s.
+
+## 2026-04-27 — /release v0.4.0
+
+- **Commit**: pending
+- **Outcome**: Released v0.4.0 (darwin-arm64, linux-amd64, linux-arm64).
+  No change to the `ytt` CLI itself — the release ships
+  `scripts/playlist-ingest/`, a set of companion bash scripts for
+  batch-ingesting a YouTube playlist into a local Obsidian-vault
+  knowledge base. Each ingested video produces a topic-slug-named
+  synopsis (with a one-line TL;DR consumed by an auto-generated
+  `youtube-knowledge-base.md` index) and parks the bulky raw transcript
+  in a `.transcript/` dotfolder so Obsidian's graph view stays clean.
+  The synopsis filename and TL;DR conventions emerged from real use
+  against a 16-video playlist on 2026-04-26 — the original "everything
+  is named synopsis.md" layout collapsed every graph node to the same
+  label.
+- **Deferred**:
+  - `STABILITY.md` for the `ytt` CLI surface (pre-1.0 prerequisite).
+    This release doesn't change the CLI, but the document is owed
+    independently and the next CLI-touching release is the natural
+    forcing function.
