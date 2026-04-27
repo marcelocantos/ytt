@@ -23,11 +23,14 @@ log() {
     printf '[%s] [%s] %s\n' "$(date -u +%H:%M:%SZ)" "$ID" "$*" >>"$LOG"
 }
 
-mkdir -p "$DIR"
+# The transcript is bulky source material consumed once at ingest. Park
+# it in a dotfolder so Obsidian skips it (avoids 16 graph nodes labelled
+# "transcript") while still keeping it on disk for re-runs and review.
+mkdir -p "$DIR/.transcript"
 
 log "start"
 
-if ! ytt "$URL" >"$DIR/transcript.md" 2>>"$LOG"; then
+if ! ytt "$URL" >"$DIR/.transcript/transcript.md" 2>>"$LOG"; then
     log "ytt failed; cleaning up"
     rm -rf "$DIR"
     exit 1
@@ -41,7 +44,7 @@ yt-dlp --skip-download --print-json "$URL" 2>>"$LOG" \
 TITLE=$(jq -r '.title // "(unknown)"' "$DIR/meta.json" 2>/dev/null || echo "(unknown)")
 
 PROMPT=$(cat <<EOF
-Read the transcript at $DIR/transcript.md (YouTube video: "$TITLE", $URL).
+Read the transcript at $DIR/.transcript/transcript.md (YouTube video: "$TITLE", $URL).
 
 Produce a detailed synopsis and key takeaways following the /ytt skill's
 output format (multi-paragraph synopsis covering full content in logical
