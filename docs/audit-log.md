@@ -57,7 +57,7 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 ## 2026-04-27 — /release v0.4.0
 
-- **Commit**: pending
+- **Commit**: `4a512a0`
 - **Outcome**: Released v0.4.0 (darwin-arm64, linux-amd64, linux-arm64).
   No change to the `ytt` CLI itself — the release ships
   `scripts/playlist-ingest/`, a set of companion bash scripts for
