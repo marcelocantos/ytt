@@ -11,7 +11,7 @@ import sys
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import CouldNotRetrieveTranscript
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 
 AGENT_HELP = """\
