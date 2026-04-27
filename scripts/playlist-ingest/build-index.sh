@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
-# Regenerate INDEX.md by scanning all per-video synopsis.md files.
+# Regenerate the knowledge-base index by scanning all per-video synopsis files.
 #
-# Output: $ROOT/INDEX.md — a markdown table sorted by upload date (newest
-# first), with title (linked to the synopsis), channel, duration, and the
-# TL;DR line from the synopsis. Falls back to the first sentence of the
-# Synopsis section if no TL;DR line exists (legacy entries).
+# Output: $ROOT/youtube-knowledge-base.md — a markdown table sorted by upload
+# date (newest first), with title (linked to the synopsis), channel, duration,
+# and the TL;DR line from the synopsis. Falls back to the first sentence of
+# the Synopsis section if no TL;DR line exists (legacy entries).
+#
+# The filename mirrors the document's H1 heading so it reads as a useful node
+# label in an Obsidian graph view (a generic "INDEX" doesn't).
 
 set -euo pipefail
 
 ROOT="${YOUTUBE_INGEST_ROOT:-$HOME/think/knowledge/youtube}"
-INDEX="$ROOT/INDEX.md"
+INDEX="$ROOT/youtube-knowledge-base.md"
 
 extract_tldr() {
     local syn="$1"
