@@ -1,0 +1,103 @@
+schema_version: 3
+targets:
+  T1:
+    name: Playlist-ingest is a complete, end-to-end workflow installable via `brew install ytt`
+    status: identified
+    value: 5.0
+    cost: 3.0
+    showcase: true
+    acceptance:
+    - From a clean `brew install marcelocantos/tap/ytt`, a user can run the playlist-ingest workflow against a real YouTube playlist with no further package installs (yt-dlp, jq, etc. come in via the formula's `depends_on`)
+    - The playlist-ingest entry script is discoverable — either symlinked onto PATH (e.g. `ytt-ingest`) or fronted by a `ytt ingest` subcommand — without needing to know the libexec path
+    - 'README documents the playlist-ingest workflow: required env vars (`YOUTUBE_INGEST_PLAYLIST`, `YOUTUBE_INGEST_ROOT`, `YOUTUBE_CHANNELS_FILE`), how to invoke, and what lands on disk'
+    - 'Demonstration: a clean install on a throwaway shell environment runs the workflow against a small playlist and produces transcript+metadata files under `$YOUTUBE_INGEST_ROOT`'
+    context: |-
+      Decomposition of the starter milestone into a concrete first user-visible capability for ytt. Background: v0.4.0 (released 2026-04-something) shipped the playlist-ingest companion scripts under `scripts/playlist-ingest/`, bundled into the formula via `libexec.install Dir["*"]`, but only `ytt` itself is symlinked onto PATH. The scripts also rely on `yt-dlp` and `jq` which the formula does not declare. Net effect: a clean Homebrew install cannot run the playlist-ingest workflow without (a) manual brew installs of yt-dlp/jq, and (b) digging into the libexec directory. The milestone closes that gap so that playlist ingestion is a first-class, demo-able feature.
+
+      Sub-targets:
+      - 🎯T2 — Homebrew deps (yt-dlp, jq) declared on the formula
+      - 🎯T1.1 — playlist-ingest entry point is discoverable (PATH symlink or `ytt ingest` subcommand)
+      - 🎯T1.2 — README documents the playlist-ingest workflow
+
+      Out of scope for this milestone: ingesting a single video via a `ytt ingest <video-id>` subcommand (covered by `ingest-one.sh` separately), Obsidian/`.processed` schema changes, the broader "channel-ingest as a service" direction.
+    depends_on:
+    - T2
+    - T1.1
+    - T1.2
+    origin: bullseye_init
+    discovered: 2026-04-27
+  T1.1:
+    name: Playlist-ingest entry script is discoverable on a clean install (PATH symlink or `ytt ingest` subcommand)
+    status: identified
+    value: 0.0
+    cost: 0.0
+    acceptance:
+    - After `brew install marcelocantos/tap/ytt`, the user can launch the playlist-ingest workflow without referencing `$(brew --prefix)/libexec/ytt/scripts/...`
+    - 'Either: (a) the formula adds a `bin.install_symlink` entry (e.g. `ytt-ingest -> libexec/scripts/playlist-ingest/ingest.sh`), or (b) `ytt.py` grows an `ingest` subcommand that locates and execs the bundled script'
+    - Decision recorded in commit message and/or audit log noting which approach was chosen and why
+    - '`--help` (or `ytt --help` if subcommand path) advertises the ingest entry point so it''s discoverable'
+    context: |-
+      The bundled `scripts/playlist-ingest/ingest.sh` is the user-facing entry point of the ingest workflow. **Architectural finding (2026-04-28):** the brew-shipped artifact is a PyInstaller `--onedir` bundle (`dist/ytt/ytt` + `dist/ytt/_internal/`), and the release.yml tarball step (`tar -C dist/ytt -czf ... .`) does NOT include the `scripts/` directory. So the scripts are not present in a brew install at all — the audit-log assumption that "they're bundled but not surfaced" was wrong. The platform-specific URL blocks in the formula short-circuit the source tarball; only the binary tarball is downloaded.
+
+      Decision: go with the **`ytt ingest` subcommand** approach AND extend the release pipeline to copy `scripts/` into `dist/ytt/scripts/` before tarring.
+
+      Runtime path resolution in `ytt.py`:
+      - Frozen (PyInstaller): `Path(sys.executable).resolve().parent / "scripts" / "playlist-ingest" / "ingest.sh"`
+      - Source/dev: `Path(__file__).resolve().parent / "scripts" / "playlist-ingest" / "ingest.sh"`
+
+      Subcommand handling: detect `argv[1] == "ingest"` *before* argparse (so the rest passes through verbatim), then `os.execvp("bash", ["bash", str(script_path), *argv[2:]])`.
+    origin: decomposition of T1
+    discovered: 2026-04-28
+  T1.2:
+    name: README documents the playlist-ingest workflow
+    status: identified
+    value: 0.0
+    cost: 0.0
+    acceptance:
+    - README has a `## Playlist ingest` (or similar) section describing what the workflow does and what state it produces on disk
+    - 'Documents required and optional env vars: `YOUTUBE_INGEST_PLAYLIST`, `YOUTUBE_INGEST_ROOT` (default `~/think/knowledge/youtube`), `YOUTUBE_CHANNELS_FILE`, `YOUTUBE_INGEST_CONCURRENCY`'
+    - 'Includes a minimal copy-pasteable example: set env, run the entry command, see results'
+    - Mentions runtime deps (`yt-dlp`, `jq`) but notes they come in via Homebrew automatically; calls out `claude` (npm) as required for `ingest-one.sh` if/when that's surfaced
+    - Cross-references the entry-point decision from 🎯T1.1 (i.e. uses whichever invocation form ships)
+    context: |-
+      The README currently documents only the `ytt` transcript CLI. Playlist ingest is invisible to anyone discovering ytt through Homebrew or the GitHub release page. This sub-target closes that gap so the milestone-level "first-class workflow" claim is actually true for users.
+
+      Order this after 🎯T1.1 lands so the docs reference the final invocation form rather than getting rewritten.
+    depends_on:
+    - T1.1
+    origin: decomposition of T1
+    discovered: 2026-04-28
+  T2:
+    name: Homebrew formula declares yt-dlp, jq, and yq as runtime deps so the bundled playlist-ingest scripts work on a clean install
+    status: identified
+    value: 0.0
+    cost: 0.0
+    acceptance:
+    - Formula at `~/work/github.com/marcelocantos/homebrew-tap/Formula/ytt.rb` declares `depends_on "yt-dlp"`, `depends_on "jq"`, and `depends_on "yq"`
+    - Running `ytt ingest` from a clean `brew install ytt` works without manual `brew install yt-dlp jq yq` steps
+    - homebrew-releaser config in ytt's `.github/workflows/release.yml` is updated so the next release auto-regenerates the formula with the depends_on lines
+    - If/when scripts are surfaced via additional `bin.install_symlink` entries (currently `ytt` is the only symlink — the `ingest` subcommand routes via the bundled scripts/), the deps are already in place
+    context: |-
+      Background: ytt is a CLI (no `service do` block, no launchd PATH bug). The `ytt.py` binary itself is clean — no subprocess calls. The dependency gap is in the bundled bash scripts.
+
+      Audit findings for ytt (from ~/think investigation 2026-04-27):
+      - `ytt.py` — no subprocess calls. ✅
+      - `scripts/playlist-ingest/ingest.sh` — uses `yt-dlp` (brew), `jq` (brew)
+      - `scripts/playlist-ingest/ingest-one.sh` — uses `yt-dlp`, `jq`, `ytt` (self), `claude` (npm, NOT in brew)
+      - `scripts/playlist-ingest/build-index.sh` — uses `jq`, plus `awk`/`sed` (system)
+
+      Formula state (verified 2026-04-27): no `depends_on`. The formula does `libexec.install Dir["*"]` (bundles everything including the scripts) then `bin.install_symlink libexec/"ytt"` (only exposes `ytt` on PATH). So scripts are bundled but not surfaced.
+
+      Even though the scripts aren't directly on PATH, users who invoke them via `$(brew --prefix)/libexec/ytt/scripts/playlist-ingest/...` (or via internal calls from `ytt`) need yt-dlp and jq installed. Declaring `depends_on` makes `brew install ytt` self-sufficient regardless of how the scripts get invoked.
+
+      Tools NOT in Homebrew, kept as expectations: `claude` (npm global). Documenting in caveats is optional; users running playlist ingest will already have it.
+
+      Formula additions:
+      ```ruby
+      depends_on "yt-dlp"
+      depends_on "jq"
+      ```
+
+      Sibling targets exist on mnemo (🎯T47), sawmill (🎯T33), vellum (🎯T8), pageflip (🎯T32), jevons (🎯T19) covering the broader homebrew-tap dependency-audit initiative.
+    origin: forked-from spyder PATH-bug investigation in ~/think on 2026-04-27 (homebrew-tap-wide audit)
+    discovered: 2026-04-27
