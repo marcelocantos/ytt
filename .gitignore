@@ -25,3 +25,6 @@ venv/
 .vscode/
 .idea/
 .DS_Store
+
+# Personal playlist-ingest config (use channels.example.yaml as a template)
+scripts/playlist-ingest/channels.yaml
