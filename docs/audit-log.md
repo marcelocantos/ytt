@@ -78,7 +78,7 @@ maintenance activities. Append-only — newest entries at the bottom.
 
 ## 2026-04-28 — /release v0.5.0
 
-- **Commit**: _filled in after merge_
+- **Commit**: `82cbddb`
 - **Outcome**: Made playlist ingest a first-class, brew-installable
   workflow. Three architectural fixes ride together:
   1. `ytt ingest [PLAYLIST_URL]` subcommand — passes through to the
@@ -102,8 +102,12 @@ maintenance activities. Append-only — newest entries at the bottom.
 - **Showcase**: 🎯T1 retired on demonstration of `ytt ingest` against
   a small playlist from a clean install — see release notes.
 - **Deferred**:
-  - `STABILITY.md` (still owed; ingest subcommand is the first CLI
-    surface change post-v0.4.0)
   - `claude` (npm) is still required for synopsis generation in
     `ingest-one.sh` and is not in Homebrew. Documented in README,
     not blocked.
+  - PyPI publishing (still deferred from v0.1.0; tracked in STABILITY.md
+    gaps). Re-enable before 1.0.
+- **STABILITY.md**: created in this release. Catalogues the CLI surface,
+  the playlist-ingest env-var contract, and the on-disk knowledge-base
+  layout, with stability annotations (Stable / Needs review / Fluid).
+  Pre-1.0 — settling threshold not yet met.
