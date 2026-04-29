@@ -56,6 +56,13 @@ jobs:
           pyinstaller --onedir --name ytt ytt.py
           ./dist/ytt/ytt --version
 
+      - name: Bundle playlist-ingest scripts
+        shell: bash
+        run: |
+          # `ytt ingest` resolves scripts/ relative to the binary at runtime,
+          # so the bash workflow has to ship alongside it inside the tarball.
+          cp -R scripts dist/ytt/scripts
+
       - name: Package tarball
         shell: bash
         env:
@@ -64,9 +71,10 @@ jobs:
           version="${TAG#v}"
           name="ytt-${version}-${{ matrix.target }}"
           # Tarball contents are the *contents* of dist/ytt — the `ytt`
-          # binary at the root plus its `_internal` deps directory. The
-          # brew formula moves everything into libexec and symlinks the
-          # binary into bin (see homebrew-releaser `install:` below).
+          # binary at the root, its `_internal` deps directory, and the
+          # bundled `scripts/` tree. The brew formula moves everything
+          # into libexec and symlinks the binary into bin (see
+          # homebrew-releaser `install:` below).
           tar -C dist/ytt -czf "${name}.tar.gz" .
           shasum -a 256 "${name}.tar.gz"
 
@@ -93,6 +101,10 @@ jobs:
           install: |
             libexec.install Dir["*"]
             bin.install_symlink libexec/"ytt"
+          depends_on: |
+            "yt-dlp"
+            "jq"
+            "yq"
           test: 'assert_match "ytt #{version}", shell_output("#{bin}/ytt --version")'
           target_darwin_arm64: true
           target_linux_amd64: true

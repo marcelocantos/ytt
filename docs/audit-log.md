@@ -75,3 +75,35 @@ maintenance activities. Append-only — newest entries at the bottom.
     This release doesn't change the CLI, but the document is owed
     independently and the next CLI-touching release is the natural
     forcing function.
+
+## 2026-04-28 — /release v0.5.0
+
+- **Commit**: _filled in after merge_
+- **Outcome**: Made playlist ingest a first-class, brew-installable
+  workflow. Three architectural fixes ride together:
+  1. `ytt ingest [PLAYLIST_URL]` subcommand — passes through to the
+     bundled `scripts/playlist-ingest/ingest.sh`; arg-parsed before
+     argparse so all flags reach the bash workflow untouched. Resolves
+     the scripts dir via `Path(sys.executable).resolve().parent` when
+     frozen and `__file__` otherwise, so source and brew-installed runs
+     share one code path.
+  2. Release pipeline now copies `scripts/` into `dist/ytt/` before
+     tarring. v0.4.0 had shipped the scripts in the source tree but
+     PyInstaller's `--onedir` output dropped them, so the binary
+     tarball brew downloads contained no scripts at all. (The audit-log
+     for 🎯T1.1 records the discovery.)
+  3. homebrew-releaser config grows a `depends_on:` block for `yt-dlp`,
+     `jq`, and `yq`. Future releases regenerate the formula with these
+     deps so `brew install ytt` is self-sufficient for the ingest path.
+  Also: README gains a `## Playlist ingest` section with env-var
+  reference, on-disk layout, and a copy-pasteable example.
+  `channels.example.yaml` ships as a template; the active
+  `channels.yaml` is gitignored so personal channel lists stay local.
+- **Showcase**: 🎯T1 retired on demonstration of `ytt ingest` against
+  a small playlist from a clean install — see release notes.
+- **Deferred**:
+  - `STABILITY.md` (still owed; ingest subcommand is the first CLI
+    surface change post-v0.4.0)
+  - `claude` (npm) is still required for synopsis generation in
+    `ingest-one.sh` and is not in Homebrew. Documented in README,
+    not blocked.

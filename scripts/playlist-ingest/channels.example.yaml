@@ -1,0 +1,22 @@
+# Tracked YouTube channels. Each run, the channel's upload feed is walked
+# newest-first and every video newer than the recorded cursor is queued for
+# ingest. The cursor is then advanced to the newest video seen.
+#
+# Bootstrap policy (no cursor yet): the channel's latest video is ingested
+# and recorded as the cursor. Older videos are not backfilled.
+#
+# Cursor state lives in $YOUTUBE_INGEST_ROOT/.channels/<handle>.
+#
+# Fields:
+#   handle  — channel handle (with or without leading "@"), required
+#   name    — display name, optional (cosmetic only)
+
+channels:
+  # Replace these with the channels you want to track. Delete the section
+  # entirely if you only want playlist ingest — the channel walker is a
+  # no-op when channels.yaml is absent.
+  - handle: lexfridman
+    name: Lex Fridman
+
+  - handle: 3blue1brown
+    name: 3Blue1Brown
