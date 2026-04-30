@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Mock ytt. Writes a fake transcript to stdout.
+# Fails for IDs listed in MOCK_YTT_FAIL (comma-separated).
+
+set -e
+
+URL="$1"
+id="${URL##*watch?v=}"
+id="${id%%&*}"
+
+if [[ ",${MOCK_YTT_FAIL:-}," == *",$id,"* ]]; then
+    echo "mock ytt: forced failure for $id" >&2
+    exit 1
+fi
+
+printf '[00:00] Mock transcript line for %s.\n' "$id"
+printf '[00:05] Second mock transcript line.\n'
