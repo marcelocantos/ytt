@@ -84,3 +84,17 @@ jobs:
         run: |
           pip install twine
           twine check dist/*
+
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bats
+        run: sudo apt-get update && sudo apt-get install -y bats
+      - name: Syntax-check shell scripts
+        run: |
+          bash -n scripts/playlist-ingest/ingest.sh
+          bash -n scripts/playlist-ingest/ingest-one.sh
+          bash -n scripts/playlist-ingest/build-index.sh
+      - name: Run bats tests
+        run: bats scripts/playlist-ingest/tests/

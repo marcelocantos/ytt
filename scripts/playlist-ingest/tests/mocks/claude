@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Mock claude. Writes a fake synopsis file to the dir specified by --add-dir.
+# Fails for IDs listed in MOCK_CLAUDE_FAIL (comma-separated, each = video ID).
+# Also supports MOCK_CLAUDE_NO_WRITE=<id> to simulate "claude exits 0 but
+# never writes the synopsis file" — exercises the synopsis-missing path.
+
+set -e
+
+DIR=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --add-dir) DIR="$2"; shift 2 ;;
+        *) shift ;;
+    esac
+done
+
+# Drain stdin.
+cat >/dev/null
+
+if [[ -z "$DIR" ]]; then
+    echo "mock claude: no --add-dir" >&2
+    exit 1
+fi
+
+ID="$(basename "$DIR")"
+
+if [[ ",${MOCK_CLAUDE_FAIL:-}," == *",$ID,"* ]]; then
+    echo "mock claude: forced failure for $ID" >&2
+    exit 1
+fi
+
+if [[ ",${MOCK_CLAUDE_NO_WRITE:-}," == *",$ID,"* ]]; then
+    # Exit 0 but write nothing — simulates a Claude session that produced
+    # no synopsis file.
+    printf 'no-write.md\n'
+    exit 0
+fi
+
+SLUG="mock-synopsis-$ID.md"
+cat > "$DIR/$SLUG" <<EOF
+# Mock title $ID
+
+Source: https://www.youtube.com/watch?v=$ID
+
+**TL;DR**: Mock TL;DR for $ID.
+
+## Synopsis
+
+Mock synopsis paragraph.
+
+## Key Takeaways
+
+- Mock takeaway
+EOF
+
+printf '%s\n' "$SLUG"

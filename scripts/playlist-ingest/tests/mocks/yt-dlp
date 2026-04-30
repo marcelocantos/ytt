@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Mock yt-dlp. Dispatches on argv pattern.
+#
+# Inputs (via env):
+#   MOCK_YT_DLP_PLAYLIST_IDS       — space-separated IDs for the playlist
+#   MOCK_YT_DLP_CHANNEL_<HANDLE>   — space-separated IDs for that channel
+#                                    (HANDLE = uppercased, alnum-only)
+#   MOCK_YT_DLP_META_FAIL          — comma-separated IDs to fail meta for
+
+set -e
+
+# Parse argv to figure out the mode and the URL.
+MODE=""
+URL=""
+PLAYLIST_END=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --flat-playlist|--lazy-playlist|--print|id|--playlist-reverse|--skip-download|--print-json)
+            shift
+            ;;
+        --playlist-end)
+            PLAYLIST_END="$2"; shift 2
+            ;;
+        http*|https*)
+            URL="$1"; shift
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+# Re-scan original args via $@ — but we already shifted them. Use a
+# different strategy: reparse from "$@" string passed in via argv0 hack.
+# Simpler: detect mode from the URL pattern + presence of --playlist-end.
+
+handle_for() {
+    # Extract handle from a YouTube channel URL like
+    # https://www.youtube.com/@<handle>/videos
+    sed -E 's#.*@([^/]+)/videos.*#\1#' <<<"$1"
+}
+
+if [[ "$URL" == *playlist?list=* || "$URL" == *playlist*list=* ]]; then
+    # Playlist listing.
+    for id in ${MOCK_YT_DLP_PLAYLIST_IDS:-}; do
+        printf '%s\n' "$id"
+    done
+elif [[ "$URL" == *@*/videos* ]]; then
+    # Channel feed.
+    handle="$(handle_for "$URL")"
+    var="MOCK_YT_DLP_CHANNEL_$(printf '%s' "$handle" | tr -c '[:alnum:]' _)"
+    ids="${!var:-}"
+    if [[ -n "$PLAYLIST_END" ]]; then
+        # --playlist-end N: emit at most N IDs.
+        emitted=0
+        for id in $ids; do
+            (( emitted >= PLAYLIST_END )) && break
+            printf '%s\n' "$id"
+            emitted=$((emitted + 1))
+        done
+    else
+        for id in $ids; do
+            printf '%s\n' "$id"
+        done
+    fi
+elif [[ "$URL" == *watch?v=* ]]; then
+    # Per-video metadata fetch.
+    id="${URL##*watch?v=}"
+    id="${id%%&*}"
+    if [[ ",${MOCK_YT_DLP_META_FAIL:-}," == *",$id,"* ]]; then
+        echo "mock yt-dlp: forced meta failure for $id" >&2
+        exit 1
+    fi
+    printf '{"id":"%s","title":"Mock %s","uploader":"mock","channel":"mock",' "$id" "$id"
+    printf '"channel_id":"UCmock","upload_date":"20260430","duration":120,'
+    printf '"view_count":42,"description":"mock","webpage_url":"%s","tags":[]}\n' "$URL"
+else
+    echo "mock yt-dlp: unrecognized URL: $URL" >&2
+    exit 1
+fi
