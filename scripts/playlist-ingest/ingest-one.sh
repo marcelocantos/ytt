@@ -36,10 +36,18 @@ if ! ytt "$URL" >"$DIR/.transcript/transcript.md" 2>>"$LOG"; then
     exit 1
 fi
 
-yt-dlp --skip-download --print-json "$URL" 2>>"$LOG" \
+# Pipe failures cascade via pipefail so a yt-dlp/jq breakage produces a
+# non-zero status (rather than silently writing a 0-byte meta.json that
+# poisons the synopsis step).
+set -o pipefail
+if ! yt-dlp --skip-download --print-json "$URL" 2>>"$LOG" \
     | jq '{id, title, uploader, channel, channel_id, upload_date,
            duration, view_count, description, webpage_url, tags}' \
-    >"$DIR/meta.json" || log "meta fetch failed (non-fatal)"
+    >"$DIR/meta.json"; then
+    log "meta fetch failed; cleaning up"
+    rm -rf "$DIR"
+    exit 1
+fi
 
 TITLE=$(jq -r '.title // "(unknown)"' "$DIR/meta.json" 2>/dev/null || echo "(unknown)")
 
@@ -90,7 +98,8 @@ if ! printf '%s\n' "$PROMPT" | claude -p \
     --permission-mode acceptEdits \
     --allowedTools "Read,Write" \
     --add-dir "$DIR" >>"$LOG" 2>&1; then
-    log "claude synopsis failed"
+    log "claude synopsis failed; cleaning up"
+    rm -rf "$DIR"
     exit 1
 fi
 
@@ -99,7 +108,8 @@ SYNOPSIS=$(find "$DIR" -maxdepth 1 -type f -name '*.md' \
     ! -name 'transcript*' -print -quit)
 
 if [[ -z "$SYNOPSIS" || ! -s "$SYNOPSIS" ]]; then
-    log "synopsis file missing or empty"
+    log "synopsis file missing or empty; cleaning up"
+    rm -rf "$DIR"
     exit 1
 fi
 

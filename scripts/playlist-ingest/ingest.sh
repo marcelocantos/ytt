@@ -11,10 +11,16 @@
 #
 # All sources share $ROOT/.processed for dedup. For channels, a per-channel
 # cursor file at $ROOT/.channels/<handle> records the most recent video ID
-# seen so far. On first sight (no cursor): the channel's latest video is
-# ingested and recorded as the cursor — no backfill of older uploads.
-# On subsequent runs: the channel's upload feed is walked newest-first and
-# every video newer than the cursor is ingested. Cursor is then advanced.
+# from this channel that's landed in .processed — no backfill of older
+# uploads beyond the cursor.
+#
+# Cursor invariant: a cursor file should ALWAYS name an ID present in
+# .processed. The cursor advances after the worker pool drains, walking
+# this run's discoveries oldest-first and stopping at the first ID that
+# didn't land. Failed ingests stay above the cursor and get retried next
+# run. If a stale cursor is encountered (not in .processed — a relic of
+# an older speculative-advance bug), it is distrusted and the walk
+# proceeds past it, bounded by a safety limit.
 #
 # Concurrency: $YOUTUBE_INGEST_CONCURRENCY (default 4).
 # Output:      $YOUTUBE_INGEST_ROOT     (default ~/think/knowledge/youtube)
@@ -32,6 +38,9 @@ STATE="$ROOT/.processed"
 LOG="$ROOT/.ingest.log"
 CHANNELS_DIR="$ROOT/.channels"
 CONCURRENCY="${YOUTUBE_INGEST_CONCURRENCY:-4}"
+# Safety limit on how deep into a channel feed we'll walk in one run.
+# Bounds the worst case when a cursor is stale or missing.
+CHANNEL_WALK_LIMIT=50
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CHANNELS_FILE="${YOUTUBE_CHANNELS_FILE:-$HERE/channels.yaml}"
 
@@ -46,6 +55,25 @@ log() {
 
 log "playlist=$PLAYLIST root=$ROOT concurrency=$CONCURRENCY"
 
+# Heal orphan dirs from previous failed runs. The .processed file is the
+# authoritative record of successful ingest; any per-video dir that exists
+# without being in .processed was killed mid-run, had its synopsis step
+# fail, or otherwise crashed before ingest-one.sh could record success.
+# Wipe the half-built dir and queue the ID for a fresh attempt below.
+shopt -s nullglob
+ORPHAN_NEW=()
+for dir in "$ROOT"/*/; do
+    id="$(basename "$dir")"
+    grep -Fxq -- "$id" "$STATE" && continue
+    ORPHAN_NEW+=("$id")
+    rm -rf "$dir"
+done
+shopt -u nullglob
+
+if (( ${#ORPHAN_NEW[@]} > 0 )); then
+    log "orphan dirs from failed prior runs (queued for retry): ${ORPHAN_NEW[*]}"
+fi
+
 # Collect new IDs from the playlist.
 mapfile -t PLAYLIST_IDS < <(
     yt-dlp --flat-playlist --print id --playlist-reverse "$PLAYLIST"
@@ -58,10 +86,15 @@ done
 log "playlist=${#PLAYLIST_IDS[@]} pending=${#PLAYLIST_NEW[@]}"
 
 # Collect new IDs from each tracked channel.
-#   Bootstrap (no cursor): take the latest upload, record it as the cursor,
-#   queue it for ingest unless already in .processed.
-#   Steady state: walk the upload feed newest-first, stopping at the cursor.
-#   Everything above the cursor (and not already in .processed) is queued.
+#   Bootstrap (no cursor): take the latest upload. If already in .processed,
+#     adopt it as the cursor immediately. Otherwise queue it and DEFER the
+#     cursor write — it'll be set by the post-fan-out step iff ingest lands.
+#   Steady state: walk newest-first; stop at cursor IF the cursor is in
+#     .processed (trusted). If the cursor isn't in .processed it's a relic
+#     of an older bug — walk past it (bounded by CHANNEL_WALK_LIMIT) and
+#     dedup against .processed; the post-fan-out step writes a real cursor.
+#   In both cases, the per-channel discovery list is recorded to
+#   $CHANNELS_DIR/<handle>.discovered for the post-fan-out cursor advance.
 CHANNEL_NEW=()
 if [[ -f "$CHANNELS_FILE" ]]; then
     mapfile -t HANDLES < <(yq -r '.channels[].handle' "$CHANNELS_FILE")
@@ -70,6 +103,7 @@ if [[ -f "$CHANNELS_FILE" ]]; then
         [[ -n "$handle" ]] || continue
         url="https://www.youtube.com/@${handle}/videos"
         marker="$CHANNELS_DIR/$handle"
+        discovered="$CHANNELS_DIR/$handle.discovered"
 
         if [[ ! -f "$marker" ]]; then
             latest=$(yt-dlp --flat-playlist --playlist-end 1 --print id "$url" 2>/dev/null)
@@ -77,30 +111,43 @@ if [[ -f "$CHANNELS_FILE" ]]; then
                 log "channel @$handle: empty feed"
                 continue
             fi
-            printf '%s\n' "$latest" > "$marker"
             if grep -Fxq -- "$latest" "$STATE"; then
+                # Already processed (channel was previously bootstrapped, then
+                # cursor was lost). Adopt as cursor without ingesting.
+                printf '%s\n' "$latest" > "$marker"
                 log "channel @$handle: bootstrapped, cursor=$latest (already processed)"
             else
-                log "channel @$handle: bootstrapping with $latest"
+                # Queue, defer cursor write. If ingest lands, post-fan-out
+                # writes cursor=$latest. If it fails, no cursor file exists
+                # and the next run re-bootstraps (idempotent).
+                printf '%s\n' "$latest" > "$discovered"
                 CHANNEL_NEW+=("$latest")
+                log "channel @$handle: bootstrapping with $latest (cursor deferred)"
             fi
             continue
         fi
 
         cursor=$(<"$marker")
-        # Lazy walk: stream IDs from yt-dlp, break as soon as cursor is hit.
+        cursor_trusted=true
+        if ! grep -Fxq -- "$cursor" "$STATE"; then
+            cursor_trusted=false
+            log "channel @$handle: cursor $cursor not in .processed; treating as stale and walking past"
+        fi
+
         pending_for_channel=()
+        walked=0
         while IFS= read -r ID; do
-            [[ "$ID" == "$cursor" ]] && break
+            walked=$((walked + 1))
+            (( walked > CHANNEL_WALK_LIMIT )) && break
+            $cursor_trusted && [[ "$ID" == "$cursor" ]] && break
             grep -Fxq -- "$ID" "$STATE" && continue
             pending_for_channel+=("$ID")
         done < <(yt-dlp --flat-playlist --lazy-playlist --print id "$url" 2>/dev/null)
 
         if (( ${#pending_for_channel[@]} > 0 )); then
-            # Advance cursor to the newest collected ID.
-            printf '%s\n' "${pending_for_channel[0]}" > "$marker"
+            printf '%s\n' "${pending_for_channel[@]}" > "$discovered"
             CHANNEL_NEW+=("${pending_for_channel[@]}")
-            log "channel @$handle: pending=${#pending_for_channel[@]} new cursor=${pending_for_channel[0]}"
+            log "channel @$handle: pending=${#pending_for_channel[@]} (cursor advance deferred to post-fan-out)"
         else
             log "channel @$handle: nothing new"
         fi
@@ -109,9 +156,12 @@ else
     log "no channels file at $CHANNELS_FILE; skipping channel ingest (copy channels.example.yaml to enable)"
 fi
 
-# Merge + dedup (a video could appear in both the playlist and a channel).
+# Merge + dedup. Orphans go first so a recovered ID isn't shadowed by the
+# same ID surfacing again from a playlist or channel walk.
 mapfile -t NEW < <(
-    { printf '%s\n' "${PLAYLIST_NEW[@]}"; printf '%s\n' "${CHANNEL_NEW[@]}"; } \
+    { printf '%s\n' "${ORPHAN_NEW[@]}"
+      printf '%s\n' "${PLAYLIST_NEW[@]}"
+      printf '%s\n' "${CHANNEL_NEW[@]}"; } \
         | awk 'NF && !seen[$0]++'
 )
 
@@ -136,4 +186,43 @@ for ID in "${NEW[@]}"; do
 done
 FAILED=$(( ${#NEW[@]} - INGESTED ))
 
+# Deferred channel-cursor advance. For each channel that had discoveries,
+# walk the discovery list oldest-first; cursor advances over each
+# contiguous landed ID and stops at the first non-landed. This guarantees
+# every ID above the new cursor is either already in .processed or still
+# pending, so failed ingests get retried next run.
+shopt -s nullglob
+for discovered in "$CHANNELS_DIR"/*.discovered; do
+    handle="$(basename "$discovered" .discovered)"
+    marker="$CHANNELS_DIR/$handle"
+    mapfile -t ids < "$discovered"
+    new_cursor=""
+    for ((i = ${#ids[@]} - 1; i >= 0; i--)); do
+        if grep -Fxq -- "${ids[$i]}" "$STATE"; then
+            new_cursor="${ids[$i]}"
+        else
+            break
+        fi
+    done
+    if [[ -n "$new_cursor" ]]; then
+        printf '%s\n' "$new_cursor" > "$marker"
+        log "channel @$handle: cursor → $new_cursor"
+    else
+        log "channel @$handle: cursor unchanged (no discovered ingests landed)"
+    fi
+    rm -f "$discovered"
+done
+shopt -u nullglob
+
 log "done: $INGESTED ingested, $FAILED failed"
+
+# Refresh the knowledge-base index whenever new synopses landed. Without
+# this the per-video files exist but the user-facing summary page stays
+# frozen — exactly the symptom that prompted this design pass.
+if (( INGESTED > 0 )); then
+    if "$HERE/build-index.sh" >>"$LOG" 2>&1; then
+        log "index refreshed"
+    else
+        log "index refresh failed (see $LOG)"
+    fi
+fi
