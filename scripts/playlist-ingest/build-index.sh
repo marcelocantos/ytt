@@ -2,8 +2,8 @@
 # Regenerate the knowledge-base index by scanning all per-video synopsis files.
 #
 # Output: $ROOT/youtube-knowledge-base.md — a two-column markdown table sorted
-# by upload date (newest first). The first column packs title (linked to the
-# synopsis), channel, date, and duration onto two lines; the second column
+# by upload date (newest first). The first column stacks title (linked to the
+# synopsis), channel, and date · duration on three lines; the second column
 # carries the TL;DR line from the synopsis. Falls back to the first sentence
 # of the Synopsis section if no TL;DR line exists (legacy entries).
 #
@@ -78,7 +78,7 @@ ROWS=$(
         date_str=$(format_date "$updated")
         dur_str=$(format_duration "$dur")
         link_url=${url:-https://www.youtube.com/watch?v=$id}
-        row=$(printf '| **[%s](%s/%s)** ([yt](%s))<br>%s · %s · %s | %s |' \
+        row=$(printf '| **[%s](%s/%s)** ([yt](%s))<br>%s<br>%s · %s | %s |' \
             "$title_esc" "$id" "$slug_file" "$link_url" \
             "$channel_esc" "$date_str" "$dur_str" "$tldr_esc")
         # Sort key: upload_date if present (YYYYMMDD sorts naturally), else "00000000".
