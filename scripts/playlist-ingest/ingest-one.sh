@@ -26,11 +26,15 @@ log() {
 # The transcript is bulky source material consumed once at ingest. Park
 # it in a dotfolder so Obsidian skips it (avoids 16 graph nodes labelled
 # "transcript") while still keeping it on disk for re-runs and review.
+# JSON preserves the upstream library's full payload (per-segment timing,
+# language metadata, auto-generated flag) — pretty-printed via jq so it
+# stays readable when opened directly.
 mkdir -p "$DIR/.transcript"
 
 log "start"
 
-if ! ytt "$URL" >"$DIR/.transcript/transcript.md" 2>>"$LOG"; then
+set -o pipefail
+if ! ytt --json "$URL" 2>>"$LOG" | jq . >"$DIR/.transcript/transcript.json"; then
     log "ytt failed; cleaning up"
     rm -rf "$DIR"
     exit 1
@@ -39,7 +43,6 @@ fi
 # Pipe failures cascade via pipefail so a yt-dlp/jq breakage produces a
 # non-zero status (rather than silently writing a 0-byte meta.json that
 # poisons the synopsis step).
-set -o pipefail
 if ! yt-dlp --skip-download --print-json "$URL" 2>>"$LOG" \
     | jq '{id, title, uploader, channel, channel_id, upload_date,
            duration, view_count, description, webpage_url, tags}' \
@@ -52,7 +55,12 @@ fi
 TITLE=$(jq -r '.title // "(unknown)"' "$DIR/meta.json" 2>/dev/null || echo "(unknown)")
 
 PROMPT=$(cat <<EOF
-Read the transcript at $DIR/.transcript/transcript.md (YouTube video: "$TITLE", $URL).
+Read the transcript at $DIR/.transcript/transcript.json (YouTube video:
+"$TITLE", $URL). The file is the full youtube-transcript-api payload:
+a JSON object with video_id, language, language_code, is_generated, and
+a snippets array of {text, start, duration}. Join snippet text in order
+for the prose; you may cite [mm:ss] timestamps (from snippet.start) in
+Key Takeaways when a moment is worth pinning to.
 
 Produce a detailed synopsis and key takeaways following the /ytt skill's
 output format (multi-paragraph synopsis covering full content in logical

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -22,7 +23,9 @@ ytt — YouTube transcript fetcher for CLI use.
 Usage:
   ytt <video>                      plain transcript (single line, space-joined)
   ytt -t <video>                   one segment per line, prefixed with [mm:ss]
+  ytt --json <video>               full API payload as JSON (one object per video)
   ytt <v1> <v2> ...                multiple videos, separated by a blank line
+                                   (or one JSON object per line with --json)
   ytt ingest [PLAYLIST_URL]        bulk-ingest a playlist + tracked channels
 
 Accepted input forms:
@@ -35,16 +38,29 @@ Output:
   Transcript text goes to stdout. Errors go to stderr, one line per failure,
   in the form "ytt: <video-id>: <reason>".
 
+  --json emits one compact JSON object per video on its own line (JSONL for
+  multi-video inputs). Schema:
+    {
+      "video_id": "<id>",
+      "language": "English",
+      "language_code": "en",
+      "is_generated": false,
+      "snippets": [{"text": "...", "start": 0.0, "duration": 2.5}, ...]
+    }
+  Pipe through `jq .` for human-readable output.
+
 Exit codes:
   0   all requested transcripts fetched successfully
   1   at least one video failed (unavailable, transcripts disabled, etc.)
   2   usage error (no arguments, bad flag)
 
 Agent tips:
-  - Prefer -t/--timestamps when the downstream task cares about *when*
-    something was said (summarisation with citations, jumping to timestamps).
-  - Without -t, the transcript is a single long line — good for passing
-    directly into an LLM prompt or piping through `wc -w`.
+  - Use --json when you want to preserve everything the upstream API
+    returns (per-segment timing, language metadata, auto-generated flag).
+  - Prefer -t/--timestamps when you want human-readable timestamps but
+    don't need the structured payload.
+  - Without -t/--json, the transcript is a single long line — good for
+    passing directly into an LLM prompt or piping through `wc -w`.
   - Errors are plain text; no need to parse JSON.
   - `ytt ingest` is a thin wrapper around the bundled bash workflow under
     scripts/playlist-ingest/. Configure via env vars (see README §Playlist
@@ -94,10 +110,22 @@ def format_timestamp(seconds: float) -> str:
     return f"[{m:02d}:{s:02d}]"
 
 
-def fetch_transcript(video_id: str, timestamps: bool) -> str:
-    api = YouTubeTranscriptApi()
-    transcript = api.fetch(video_id)
-    if timestamps:
+def fetch_transcript(video_id: str, mode: str) -> str:
+    transcript = YouTubeTranscriptApi().fetch(video_id)
+    if mode == "json":
+        # Mirror the FetchedTranscript public surface verbatim — anything
+        # the upstream library exposes about the fetch should land here so
+        # downstream consumers don't lose fidelity. `to_raw_data()` already
+        # serialises snippets as {text, start, duration}.
+        payload = {
+            "video_id": transcript.video_id,
+            "language": transcript.language,
+            "language_code": transcript.language_code,
+            "is_generated": transcript.is_generated,
+            "snippets": transcript.to_raw_data(),
+        }
+        return json.dumps(payload, ensure_ascii=False)
+    if mode == "timestamps":
         return "\n".join(
             f"{format_timestamp(item.start)} {item.text}" for item in transcript
         )
@@ -119,10 +147,16 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="VIDEO",
         help="YouTube video ID or URL (one or more)",
     )
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "-t", "--timestamps",
         action="store_true",
         help="prefix each segment with its [mm:ss] timestamp",
+    )
+    mode.add_argument(
+        "--json",
+        action="store_true",
+        help="emit the full API payload as JSON (one object per video, JSONL for multi)",
     )
     parser.add_argument(
         "--version",
@@ -155,13 +189,17 @@ def main(argv: list[str] | None = None) -> int:
     if not args.videos:
         parser.error("at least one VIDEO argument is required")
 
+    mode = "json" if args.json else "timestamps" if args.timestamps else "plain"
+
     exit_code = 0
     for i, raw in enumerate(args.videos):
-        if i:
+        # Text modes use a blank line between videos; JSON mode is JSONL,
+        # so each object's trailing newline is the only separator.
+        if i and mode != "json":
             print()
         video_id = extract_video_id(raw)
         try:
-            print(fetch_transcript(video_id, args.timestamps))
+            print(fetch_transcript(video_id, mode))
         except CouldNotRetrieveTranscript as e:
             reason = type(e).__name__
             print(f"ytt: {video_id}: {reason}", file=sys.stderr)

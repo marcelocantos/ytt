@@ -36,6 +36,7 @@ ytt dQw4w9WgXcQ                                  # raw video ID
 ytt https://www.youtube.com/watch?v=dQw4w9WgXcQ  # full URL
 ytt https://youtu.be/dQw4w9WgXcQ                 # short URL
 ytt --timestamps dQw4w9WgXcQ                     # one line per segment, [mm:ss] prefix
+ytt --json dQw4w9WgXcQ                           # full API payload as JSON
 ytt <id1> <id2> <id3>                            # multiple videos, blank line between
 ```
 
@@ -56,11 +57,33 @@ With `--timestamps` (`-t`), each segment is on its own line:
 ...
 ```
 
+With `--json`, the full upstream payload is emitted — per-segment timing,
+language metadata, and the auto-generated flag — one compact JSON object
+per video (JSONL for multi-video):
+
+```sh
+ytt --json dQw4w9WgXcQ | jq .
+```
+
+```json
+{
+  "video_id": "dQw4w9WgXcQ",
+  "language": "English",
+  "language_code": "en",
+  "is_generated": false,
+  "snippets": [
+    {"text": "Never gonna give you up", "start": 0.0, "duration": 2.5},
+    ...
+  ]
+}
+```
+
 ## Flags
 
 | Flag | Purpose |
 |---|---|
 | `-t`, `--timestamps` | Prefix each segment with `[mm:ss]` (or `[h:mm:ss]` for long videos), one per line |
+| `--json` | Emit the full API payload as JSON (one object per video, JSONL for multi). Mutually exclusive with `-t`. |
 | `--version` | Print version |
 | `--help` | Print usage |
 | `--help-agent` | Extended help oriented toward AI/agent consumers |
@@ -100,8 +123,8 @@ ytt ingest
 ```
 $YOUTUBE_INGEST_ROOT/
 ├── <video-id>/
-│   ├── .transcript/transcript.md   # raw transcript (hidden from Obsidian graph)
-│   ├── metadata.json               # title, channel, upload date, duration, …
+│   ├── .transcript/transcript.json # full youtube-transcript-api payload (hidden from Obsidian graph)
+│   ├── meta.json                   # title, channel, upload date, duration, …
 │   └── <slug>.md                   # synopsis (generated via `claude`)
 ├── .processed                      # dedup state (one video ID per line)
 ├── .channels/<handle>              # per-channel cursor file
