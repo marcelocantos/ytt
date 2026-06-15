@@ -94,8 +94,8 @@ log "playlist=${#PLAYLIST_IDS[@]} pending=${#PLAYLIST_NEW[@]}"
 #     of an older bug — walk past it (bounded by CHANNEL_WALK_LIMIT) and
 #     dedup against .processed; the post-fan-out step writes a real cursor.
 #   In both cases, the per-channel discovery list is recorded to
-#   $CHANNELS_DIR/<handle>.discovered for the post-fan-out cursor advance.
-CHANNEL_NEW=()
+#   $CHANNELS_DIR/<handle>.discovered, which feeds both the round-robin
+#   fan-out ordering below and the post-fan-out cursor advance.
 if [[ -f "$CHANNELS_FILE" ]]; then
     mapfile -t HANDLES < <(yq -r '.channels[].handle' "$CHANNELS_FILE")
     for handle in "${HANDLES[@]}"; do
@@ -121,7 +121,6 @@ if [[ -f "$CHANNELS_FILE" ]]; then
                 # writes cursor=$latest. If it fails, no cursor file exists
                 # and the next run re-bootstraps (idempotent).
                 printf '%s\n' "$latest" > "$discovered"
-                CHANNEL_NEW+=("$latest")
                 log "channel @$handle: bootstrapping with $latest (cursor deferred)"
             fi
             continue
@@ -146,7 +145,6 @@ if [[ -f "$CHANNELS_FILE" ]]; then
 
         if (( ${#pending_for_channel[@]} > 0 )); then
             printf '%s\n' "${pending_for_channel[@]}" > "$discovered"
-            CHANNEL_NEW+=("${pending_for_channel[@]}")
             log "channel @$handle: pending=${#pending_for_channel[@]} (cursor advance deferred to post-fan-out)"
         else
             log "channel @$handle: nothing new"
@@ -156,14 +154,47 @@ else
     log "no channels file at $CHANNELS_FILE; skipping channel ingest (copy channels.example.yaml to enable)"
 fi
 
-# Merge + dedup. Orphans go first so a recovered ID isn't shadowed by the
-# same ID surfacing again from a playlist or channel walk.
+# Build the fan-out order. Recovery orphans go first, so a recovered ID isn't
+# shadowed by the same ID resurfacing from a feed. Then a round-robin across
+# sources — the playlist and each channel — taking every source's newest
+# pending video, then every source's second-newest, and so on. This fills the
+# backlog newest-first ACROSS sources rather than draining one channel's whole
+# history before touching the next, so the most recent content lands soonest
+# (which matters now that pacing stretches a backlog over hours). Each source
+# is already newest-first: the playlist via --playlist-reverse, channels via
+# the newest-first feed walk captured in the .discovered files. Dedup keeps
+# the first occurrence.
+SOURCE_FILES=()
+PLAYLIST_PENDING=""
+if (( ${#PLAYLIST_NEW[@]} > 0 )); then
+    PLAYLIST_PENDING="$(mktemp)"
+    printf '%s\n' "${PLAYLIST_NEW[@]}" > "$PLAYLIST_PENDING"
+    SOURCE_FILES+=("$PLAYLIST_PENDING")
+fi
+shopt -s nullglob
+SOURCE_FILES+=("$CHANNELS_DIR"/*.discovered)
+shopt -u nullglob
+
 mapfile -t NEW < <(
-    { printf '%s\n' "${ORPHAN_NEW[@]}"
-      printf '%s\n' "${PLAYLIST_NEW[@]}"
-      printf '%s\n' "${CHANNEL_NEW[@]}"; } \
-        | awk 'NF && !seen[$0]++'
+    {
+        printf '%s\n' "${ORPHAN_NEW[@]}"
+        if (( ${#SOURCE_FILES[@]} > 0 )); then
+            # Round-robin by recency rank: rows keyed (source, rank); emit
+            # rank-major so slot N draws each source's Nth-newest in turn.
+            awk '
+                FNR == 1 { src++ }
+                { rank[src]++; rows[src SUBSEP rank[src]] = $0
+                  if (rank[src] > maxrank) maxrank = rank[src] }
+                END {
+                    for (r = 1; r <= maxrank; r++)
+                        for (s = 1; s <= src; s++)
+                            if ((s SUBSEP r) in rows) print rows[s SUBSEP r]
+                }
+            ' "${SOURCE_FILES[@]}"
+        fi
+    } | awk 'NF && !seen[$0]++'
 )
+if [[ -n "$PLAYLIST_PENDING" ]]; then rm -f "$PLAYLIST_PENDING"; fi
 
 if (( ${#NEW[@]} == 0 )); then
     log "nothing to do"
