@@ -1,13 +1,11 @@
-schema_version: 3
+schema_version: 5
 targets:
   T1:
     name: Playlist-ingest is a complete, end-to-end workflow installable via `brew install ytt`
     status: achieved
     value: 5.0
     cost: 3.0
-    showcase: true
     actual_cost: 3.0
-    demonstration: 'Released ytt v0.5.0 (https://github.com/marcelocantos/ytt/releases/tag/v0.5.0). Verified end-to-end on the laptop: `brew upgrade marcelocantos/tap/ytt` pulled v0.5.0 with auto-installed `yt-dlp`, `jq`, `yq` deps; `/opt/homebrew/bin/ytt --version` reports `ytt 0.5.0`; `/opt/homebrew/bin/ytt ingest --help-test` resolved the bundled scripts at `/opt/homebrew/Cellar/ytt/0.5.0/libexec/scripts/playlist-ingest/ingest.sh`, walked the playlist (empty), then logged the expected `no channels file ... skipping channel ingest (copy channels.example.yaml to enable)` fallback and exited cleanly with `nothing to do`. Subcommand passthrough, scripts bundling, deps wiring, and graceful-degradation paths all confirmed against the brew-installed binary.'
     acceptance:
     - From a clean `brew install marcelocantos/tap/ytt`, a user can run the playlist-ingest workflow against a real YouTube playlist with no further package installs (yt-dlp, jq, etc. come in via the formula's `depends_on`)
     - The playlist-ingest entry script is discoverable — either symlinked onto PATH (e.g. `ytt-ingest`) or fronted by a `ytt ingest` subcommand — without needing to know the libexec path
@@ -107,3 +105,16 @@ targets:
     origin: forked-from spyder PATH-bug investigation in ~/think on 2026-04-27 (homebrew-tap-wide audit)
     discovered: 2026-04-27
     achieved: 2026-04-29
+  T3:
+    name: ytt --json ships in a released, Homebrew-installed build
+    status: identified
+    value: 0.0
+    cost: 0.0
+    acceptance:
+    - add-json-output branch (--json payload persistence + random 3–7 min request pacing) is merged to master
+    - A new minor release (v0.6.0) is cut with --json; CI builds the release binaries
+    - homebrew-tap Formula/ytt.rb is bumped to the release and `brew upgrade ytt` installs a --json-capable ytt at /opt/homebrew/bin/ytt
+    - The ~/.local/bin/ytt → ~/.py/bin/ytt stopgap symlink is removed and the daily launchd ingest still resolves a --json-capable ytt
+    context: 'The playlist/channel ingest (scripts/playlist-ingest/ingest-one.sh) calls `ytt --json`, but the Homebrew-installed release 0.5.0 on the launchd PATH lacks --json (the feature lives only on the unmerged add-json-output branch, also tagged 0.5.0 as a dev build at ~/.py/bin/ytt). Every daily run failed with "unrecognized arguments: --json". Stopgapped on 2026-06-15 by symlinking ~/.local/bin/ytt → ~/.py/bin/ytt (launchd PATH checks .local/bin first). This target tracks doing the proper release so the stopgap can be removed.'
+    origin: manual
+    discovered: 2026-06-15
