@@ -101,6 +101,19 @@ load lib
     [[ "$output" == *"cursor → NEWEST"* ]]
 }
 
+@test "spend limit: run is cut short, remainder reported deferred" {
+    set_playlist "SPEND1"
+    export MOCK_CLAUDE_SPEND_LIMIT="SPEND1"
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"deferred (Claude spend limit"* ]]
+    ! grep -Fxq -- "SPEND1" "$ROOT/.processed" 2>/dev/null
+    # Marker is cleaned up by ingest.sh after detecting it.
+    [ ! -f "$ROOT/.spend-limit" ]
+}
+
 @test "build-index runs after a successful pass" {
     set_playlist "VID200"
 

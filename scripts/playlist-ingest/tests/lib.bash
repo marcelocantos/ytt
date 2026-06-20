@@ -17,6 +17,11 @@ setup() {
     export YOUTUBE_INGEST_CONCURRENCY=2
     export YOUTUBE_CHANNELS_FILE="$BATS_TEST_TMPDIR/channels.yaml"
 
+    # Disable request pacing in tests — ingest-one's throttle otherwise sleeps
+    # a random 3–7 min per fetch. MIN=MAX=0 ⇒ zero-length reservation, no sleep.
+    export YOUTUBE_INGEST_FETCH_INTERVAL_MIN=0
+    export YOUTUBE_INGEST_FETCH_INTERVAL_MAX=0
+
     # Empty channels file by default; tests opt in via channels_with().
     : > "$YOUTUBE_CHANNELS_FILE"
 
