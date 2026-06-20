@@ -120,9 +120,10 @@ targets:
     discovered: 2026-06-15
   T4:
     name: Ingest aborts early when the Claude synopsis step hits the monthly spend limit
-    status: identified
+    status: achieved
     value: 0.0
     cost: 0.0
+    actual_cost: 2.0
     acceptance:
     - ingest-one.sh distinguishes a Claude spend/usage-limit synopsis failure ("monthly spend limit"/usage-limit signal) from transient errors
     - On a spend-limit signal the run stops dispatching further videos instead of paced-fetching every remaining transcript only to fail each synopsis (~2h wasted per run)
@@ -131,3 +132,4 @@ targets:
     context: The 2026-06-15 backlog drain ingested 7/27, then hit the Claude monthly spend limit; the remaining 20 each paced-fetched a transcript (3-7 min apart, ~2h total) only to fail at the `claude -p` synopsis step with \"You've hit your monthly spend limit\". Detecting that signal and aborting the run early avoids hours of pointless paced YouTube fetching until the budget resets or is raised. Pacing, ordering, and --json all worked correctly; this is purely a wasted-effort guard.
     origin: manual
     discovered: 2026-06-16
+    achieved: 2026-06-21
