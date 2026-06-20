@@ -204,11 +204,21 @@ fi
 log "ingesting ${#NEW[@]} videos"
 
 # Fan out. xargs -P bounds concurrency; each worker is one ingest-one.sh
-# invocation. Workers exit non-zero on failure but xargs continues on the
-# rest; the failures stay out of .processed so they retry next run.
+# invocation. Per-video failures exit non-zero and xargs carries on; those IDs
+# stay out of .processed and retry next run. The exception is a Claude
+# spend-limit refusal: that worker drops a .spend-limit marker and exits 255,
+# which makes xargs stop reading input — dispatching no more videos. (xargs's
+# own exit status for the 255-abort differs across BSD and GNU, so the marker
+# file — not the exit code — is what we trust here.)
+rm -f "$ROOT/.spend-limit"
 printf '%s\n' "${NEW[@]}" \
     | xargs -n 1 -P "$CONCURRENCY" "$HERE/ingest-one.sh" \
     || true
+SPEND_LIMITED=false
+if [[ -f "$ROOT/.spend-limit" ]]; then
+    SPEND_LIMITED=true
+    rm -f "$ROOT/.spend-limit"
+fi
 
 # Recount from state file (authoritative).
 INGESTED=0
@@ -245,7 +255,11 @@ for discovered in "$CHANNELS_DIR"/*.discovered; do
 done
 shopt -u nullglob
 
-log "done: $INGESTED ingested, $FAILED failed"
+if $SPEND_LIMITED; then
+    log "done: $INGESTED ingested, $FAILED deferred (Claude spend limit hit — run cut short; remainder retries next run)"
+else
+    log "done: $INGESTED ingested, $FAILED failed"
+fi
 
 # Refresh the knowledge-base index whenever new synopses landed. Without
 # this the per-video files exist but the user-facing summary page stays

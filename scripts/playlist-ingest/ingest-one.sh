@@ -192,14 +192,30 @@ Do not write anything else to disk. Reply with just the slug filename
 EOF
 )
 
+# Generate the synopsis. Capture Claude's output so a spend/usage-limit
+# refusal — which will hit every remaining video too — can be told apart from
+# an ordinary per-video failure. On the spend limit, exit 255: xargs treats
+# 255 as "stop, read no more input", so the parent stops dispatching the rest
+# of the batch instead of paced-fetching transcripts for hours only to fail
+# each synopsis. The undispatched videos simply retry once the budget frees.
+SYNOPSIS_OUT="$DIR/.transcript/synopsis.out"
 if ! printf '%s\n' "$PROMPT" | claude -p \
     --permission-mode acceptEdits \
     --allowedTools "Read,Write" \
-    --add-dir "$DIR" >>"$LOG" 2>&1; then
+    --add-dir "$DIR" >"$SYNOPSIS_OUT" 2>&1; then
+    cat "$SYNOPSIS_OUT" >>"$LOG"
+    if grep -qiE 'monthly spend limit|usage limit|spend(ing)? limit|claude\.ai/settings/usage' "$SYNOPSIS_OUT"; then
+        : > "$ROOT/.spend-limit"   # marker: tell the parent the run was cut short
+        log "claude synopsis hit the spend limit; aborting run so the rest defers (exit 255 stops xargs)"
+        rm -rf "$DIR"
+        exit 255
+    fi
     log "claude synopsis failed; cleaning up"
     rm -rf "$DIR"
     exit 1
 fi
+cat "$SYNOPSIS_OUT" >>"$LOG"
+rm -f "$SYNOPSIS_OUT"
 
 # Locate the synopsis file Claude wrote (any *.md other than transcript*).
 SYNOPSIS=$(find "$DIR" -maxdepth 1 -type f -name '*.md' \
