@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
-# Mock ytt. Writes a fake transcript to stdout.
-# Fails for IDs listed in MOCK_YTT_FAIL (comma-separated).
+# Mock ytt. Emits a fake `--json` transcript payload (the shape ingest-one
+# feeds to jq) to stdout. Fails for IDs listed in MOCK_YTT_FAIL (comma-sep).
 
 set -e
 
-URL="$1"
+# ingest-one invokes `ytt --json <URL>`; pick the URL out by scheme so flag
+# order doesn't matter.
+URL=""
+for arg in "$@"; do
+    case "$arg" in http*) URL="$arg" ;; esac
+done
 id="${URL##*watch?v=}"
 id="${id%%&*}"
 
@@ -13,5 +18,7 @@ if [[ ",${MOCK_YTT_FAIL:-}," == *",$id,"* ]]; then
     exit 1
 fi
 
-printf '[00:00] Mock transcript line for %s.\n' "$id"
-printf '[00:05] Second mock transcript line.\n'
+printf '{"video_id":"%s","language":"English","language_code":"en",' "$id"
+printf '"is_generated":false,"snippets":['
+printf '{"text":"Mock transcript line for %s.","start":0.0,"duration":5.0},' "$id"
+printf '{"text":"Second mock transcript line.","start":5.0,"duration":5.0}]}\n'

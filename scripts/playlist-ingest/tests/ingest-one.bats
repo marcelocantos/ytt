@@ -7,10 +7,19 @@ load lib
     run_ingest_one VID001
 
     [ "$status" -eq 0 ]
-    [ -f "$ROOT/VID001/.transcript/transcript.md" ]
+    [ -f "$ROOT/VID001/.transcript/transcript.json" ]
     [ -f "$ROOT/VID001/meta.json" ]
     [ -f "$ROOT/VID001/mock-synopsis-VID001.md" ]
     grep -Fxq -- "VID001" "$ROOT/.processed"
+}
+
+@test "ingest-one: spend-limit refusal exits 255, drops marker, removes dir" {
+    MOCK_CLAUDE_SPEND_LIMIT="VID006" run_ingest_one VID006
+
+    [ "$status" -eq 255 ]
+    [ -f "$ROOT/.spend-limit" ]
+    [ ! -e "$ROOT/VID006" ]
+    ! grep -Fxq -- "VID006" "$ROOT/.processed" 2>/dev/null
 }
 
 @test "ingest-one: ytt failure removes the dir entirely" {

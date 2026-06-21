@@ -21,6 +21,7 @@ Snapshot as of v0.5.0.
 |---|---|
 | `ytt <video>...` (positional video IDs/URLs) | Stable |
 | `ytt -t <video>` / `ytt --timestamps <video>` | Stable |
+| `ytt --json <video>` | Stable |
 | `ytt --version` | Stable |
 | `ytt --help` | Stable |
 | `ytt --help-agent` | Stable |
@@ -33,6 +34,14 @@ Output contract (stable):
 - Plain mode: transcript joined with single spaces on stdout.
 - `-t` mode: one segment per line, prefixed with `[mm:ss]` or
   `[h:mm:ss]` for videos ≥ 1 hour.
+- `--json` mode: one compact JSON object per video on its own line
+  (JSONL for multi-video). Object shape: `video_id`, `language`,
+  `language_code`, `is_generated`, `snippets:
+  [{text, start, duration}, ...]`. Mirrors the upstream
+  `FetchedTranscript` surface; new top-level fields may be added by
+  upstream and surfaced here without a major bump (consumers must
+  ignore unknown keys).
+- `-t` and `--json` are mutually exclusive.
 - Errors on stderr, one line per failure, `ytt: <video-id>: <reason>`.
 - Exit codes `0` (all ok), `1` (≥1 video failed), `2` (usage error).
 
@@ -64,8 +73,8 @@ personal-vault-shaped and likely to move to something neutral
 
 | Path | Stability |
 |---|---|
-| `$ROOT/<video-id>/.transcript/transcript.md` | Needs review |
-| `$ROOT/<video-id>/metadata.json` (yt-dlp JSON shape) | Needs review |
+| `$ROOT/<video-id>/.transcript/transcript.json` (youtube-transcript-api payload, pretty-printed) | Needs review |
+| `$ROOT/<video-id>/meta.json` (yt-dlp JSON shape) | Needs review |
 | `$ROOT/<video-id>/<slug>.md` (synopsis) | Fluid |
 | `$ROOT/.processed` (one ID per line) | Stable |
 | `$ROOT/.channels/<handle>` (cursor file) | Stable |

@@ -2,7 +2,9 @@
 # Mock claude. Writes a fake synopsis file to the dir specified by --add-dir.
 # Fails for IDs listed in MOCK_CLAUDE_FAIL (comma-separated, each = video ID).
 # Also supports MOCK_CLAUDE_NO_WRITE=<id> to simulate "claude exits 0 but
-# never writes the synopsis file" — exercises the synopsis-missing path.
+# never writes the synopsis file" — exercises the synopsis-missing path, and
+# MOCK_CLAUDE_SPEND_LIMIT=<id> to emit the monthly-spend-limit refusal that
+# ingest-one detects to abort the run early.
 
 set -e
 
@@ -26,6 +28,11 @@ ID="$(basename "$DIR")"
 
 if [[ ",${MOCK_CLAUDE_FAIL:-}," == *",$ID,"* ]]; then
     echo "mock claude: forced failure for $ID" >&2
+    exit 1
+fi
+
+if [[ ",${MOCK_CLAUDE_SPEND_LIMIT:-}," == *",$ID,"* ]]; then
+    echo "You've hit your monthly spend limit · raise it at claude.ai/settings/usage" >&2
     exit 1
 fi
 
