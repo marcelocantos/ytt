@@ -53,6 +53,20 @@ log() {
     printf '[%s] %s\n' "$(date -u +%H:%M:%SZ)" "$*" | tee -a "$LOG" >&2
 }
 
+# Hard-timeout wrapper for the yt-dlp discovery calls below — a stalled
+# connection (e.g. after the laptop sleeps mid-run) must not wedge the run.
+# macOS lacks GNU timeout; Homebrew coreutils ships it as `timeout`/`gtimeout`.
+# Falls back to no timeout only if neither exists.
+TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
+with_timeout() {
+    local secs="$1"; shift
+    if [[ -n "$TIMEOUT_BIN" ]]; then
+        "$TIMEOUT_BIN" --kill-after=10 "$secs" "$@"
+    else
+        "$@"
+    fi
+}
+
 log "playlist=$PLAYLIST root=$ROOT concurrency=$CONCURRENCY"
 
 # Heal orphan dirs from previous failed runs. The .processed file is the
@@ -76,7 +90,7 @@ fi
 
 # Collect new IDs from the playlist.
 mapfile -t PLAYLIST_IDS < <(
-    yt-dlp --flat-playlist --print id --playlist-reverse "$PLAYLIST"
+    with_timeout 120 yt-dlp --flat-playlist --print id --playlist-reverse "$PLAYLIST"
 )
 
 PLAYLIST_NEW=()
@@ -106,7 +120,7 @@ if [[ -f "$CHANNELS_FILE" ]]; then
         discovered="$CHANNELS_DIR/$handle.discovered"
 
         if [[ ! -f "$marker" ]]; then
-            latest=$(yt-dlp --flat-playlist --playlist-end 1 --print id "$url" 2>/dev/null)
+            latest=$(with_timeout 120 yt-dlp --flat-playlist --playlist-end 1 --print id "$url" 2>/dev/null)
             if [[ -z "$latest" ]]; then
                 log "channel @$handle: empty feed"
                 continue
@@ -141,7 +155,7 @@ if [[ -f "$CHANNELS_FILE" ]]; then
             $cursor_trusted && [[ "$ID" == "$cursor" ]] && break
             grep -Fxq -- "$ID" "$STATE" && continue
             pending_for_channel+=("$ID")
-        done < <(yt-dlp --flat-playlist --lazy-playlist --print id "$url" 2>/dev/null)
+        done < <(with_timeout 120 yt-dlp --flat-playlist --lazy-playlist --print id "$url" 2>/dev/null)
 
         if (( ${#pending_for_channel[@]} > 0 )); then
             printf '%s\n' "${pending_for_channel[@]}" > "$discovered"

@@ -107,9 +107,10 @@ targets:
     achieved: 2026-04-29
   T3:
     name: ytt --json ships in a released, Homebrew-installed build
-    status: identified
+    status: achieved
     value: 0.0
     cost: 0.0
+    actual_cost: 5.0
     acceptance:
     - add-json-output branch (--json payload persistence + random 3–7 min request pacing) is merged to master
     - A new minor release (v0.6.0) is cut with --json; CI builds the release binaries
@@ -118,6 +119,7 @@ targets:
     context: 'The playlist/channel ingest (scripts/playlist-ingest/ingest-one.sh) calls `ytt --json`, but the Homebrew-installed release 0.5.0 on the launchd PATH lacks --json (the feature lives only on the unmerged add-json-output branch, also tagged 0.5.0 as a dev build at ~/.py/bin/ytt). Every daily run failed with "unrecognized arguments: --json". Stopgapped on 2026-06-15 by symlinking ~/.local/bin/ytt → ~/.py/bin/ytt (launchd PATH checks .local/bin first). This target tracks doing the proper release so the stopgap can be removed.'
     origin: manual
     discovered: 2026-06-15
+    achieved: 2026-06-21
   T4:
     name: Ingest aborts early when the Claude synopsis step hits the monthly spend limit
     status: achieved

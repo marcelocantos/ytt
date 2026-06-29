@@ -31,6 +31,22 @@ log() {
     printf '[%s] [%s] %s\n' "$(date -u +%H:%M:%SZ)" "$ID" "$*" >>"$LOG"
 }
 
+# Hard-timeout wrapper for the network / LLM calls below. A stalled connection
+# — common when the laptop sleeps mid-run — otherwise blocks a worker, and thus
+# the whole run, and thus every future run (launchd won't start a second while
+# one is alive), indefinitely: exactly what wedged the pipeline for 4 days.
+# macOS lacks GNU timeout; Homebrew coreutils ships it as `timeout`/`gtimeout`.
+# Falls back to no timeout only if neither exists. Exit 124 ⇒ timed out.
+TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
+with_timeout() {
+    local secs="$1"; shift
+    if [[ -n "$TIMEOUT_BIN" ]]; then
+        "$TIMEOUT_BIN" --kill-after=10 "$secs" "$@"
+    else
+        "$@"
+    fi
+}
+
 # --- Cross-worker YouTube request pacing ---------------------------------
 # YouTube blocks the egress IP ("IpBlocked") when it sees a burst of
 # transcript-API requests, and the block is sticky for minutes — so one burst
@@ -106,18 +122,23 @@ attempt=0
 max_attempts="${YOUTUBE_INGEST_FETCH_RETRIES:-3}"
 while :; do
     throttle
-    if err=$(ytt --json "$URL" 2>&1 >"$RAW"); then
+    rc=0
+    err=$(with_timeout 120 ytt --json "$URL" 2>&1 >"$RAW") || rc=$?
+    if (( rc == 0 )); then
         break
     fi
     printf '%s\n' "$err" >>"$LOG"
     attempt=$((attempt + 1))
-    if ! grep -qiE 'blocked|too ?many ?requests|429' <<<"$err" \
+    # A timeout (124, a stalled connection) or an IP-block is transient — retry
+    # after the next pacing slot. Anything else (no transcript, private/removed
+    # video) is permanent — fail fast rather than burn retries.
+    if { (( rc != 124 )) && ! grep -qiE 'blocked|too ?many ?requests|429' <<<"$err"; } \
         || (( attempt >= max_attempts )); then
-        log "ytt failed; cleaning up"
+        log "ytt failed (rc=$rc); cleaning up"
         rm -rf "$DIR"
         exit 1
     fi
-    log "transcript IP-blocked; will retry ($attempt/$max_attempts) after the next pacing slot"
+    log "transcript fetch failed (rc=$rc); will retry ($attempt/$max_attempts) after the next pacing slot"
 done
 
 if ! jq . "$RAW" >"$DIR/.transcript/transcript.json"; then
@@ -133,7 +154,7 @@ rm -f "$RAW"
 # rides immediately after the (paced) transcript fetch, so each video makes a
 # tight request pair every few minutes rather than two multi-minute waits —
 # same gentle aggregate rate, half the wall-clock cost.
-if ! yt-dlp --skip-download --print-json "$URL" 2>>"$LOG" \
+if ! with_timeout 120 yt-dlp --skip-download --print-json "$URL" 2>>"$LOG" \
     | jq '{id, title, uploader, channel, channel_id, upload_date,
            duration, view_count, description, webpage_url, tags}' \
     >"$DIR/meta.json"; then
@@ -199,7 +220,7 @@ EOF
 # of the batch instead of paced-fetching transcripts for hours only to fail
 # each synopsis. The undispatched videos simply retry once the budget frees.
 SYNOPSIS_OUT="$DIR/.transcript/synopsis.out"
-if ! printf '%s\n' "$PROMPT" | claude -p \
+if ! printf '%s\n' "$PROMPT" | with_timeout 600 claude -p \
     --permission-mode acceptEdits \
     --allowedTools "Read,Write" \
     --add-dir "$DIR" >"$SYNOPSIS_OUT" 2>&1; then
