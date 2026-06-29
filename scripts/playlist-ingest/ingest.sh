@@ -38,6 +38,14 @@ STATE="$ROOT/.processed"
 LOG="$ROOT/.ingest.log"
 CHANNELS_DIR="$ROOT/.channels"
 CONCURRENCY="${YOUTUBE_INGEST_CONCURRENCY:-4}"
+# Run-level watchdog: a hard cap on the whole fan-out. The per-call timeouts
+# stop any single network/LLM call hanging, but this bounds the run AS A WHOLE
+# so no other failure mode — a stuck worker the timeouts miss, a wedged loop,
+# or simply a backlog so large the 3–7 min pacing (stretched by laptop sleep)
+# runs for many hours — can keep the run, and thus every future launchd tick
+# (launchd starts no concurrent instances), alive indefinitely. On expiry the
+# fan-out is killed; unfinished videos retry next run. 0 disables the cap.
+RUN_TIMEOUT="${YOUTUBE_INGEST_RUN_TIMEOUT:-21600}"   # 6 hours
 # Safety limit on how deep into a channel feed we'll walk in one run.
 # Bounds the worst case when a cursor is stale or missing.
 CHANNEL_WALK_LIMIT=50
@@ -225,13 +233,22 @@ log "ingesting ${#NEW[@]} videos"
 # own exit status for the 255-abort differs across BSD and GNU, so the marker
 # file — not the exit code — is what we trust here.)
 rm -f "$ROOT/.spend-limit"
+run_rc=0
 printf '%s\n' "${NEW[@]}" \
-    | xargs -n 1 -P "$CONCURRENCY" "$HERE/ingest-one.sh" \
-    || true
+    | with_timeout "$RUN_TIMEOUT" xargs -n 1 -P "$CONCURRENCY" "$HERE/ingest-one.sh" \
+    || run_rc=$?
 SPEND_LIMITED=false
 if [[ -f "$ROOT/.spend-limit" ]]; then
     SPEND_LIMITED=true
     rm -f "$ROOT/.spend-limit"
+fi
+# run_rc 124 ⇒ the with_timeout cap fired (the run watchdog). Gate the report
+# on the spend-limit marker: GNU xargs ALSO exits 124 when a worker exits 255
+# (the spend-limit abort) while BSD xargs exits 1, so 124 alone is ambiguous —
+# the marker is the reliable spend-limit signal. Workers killed by the cap are
+# bounded by the per-call timeouts and exit on their own within minutes.
+if (( run_rc == 124 )) && ! $SPEND_LIMITED; then
+    log "run watchdog: fan-out exceeded ${RUN_TIMEOUT}s — terminated; unfinished videos retry next run"
 fi
 
 # Recount from state file (authoritative).
