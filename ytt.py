@@ -14,7 +14,7 @@ from pathlib import Path
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import CouldNotRetrieveTranscript
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 
 AGENT_HELP = """\
