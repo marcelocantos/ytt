@@ -114,6 +114,18 @@ load lib
     [ ! -f "$ROOT/.spend-limit" ]
 }
 
+@test "run watchdog: caps the fan-out and reports termination" {
+    # A worker that outlives a tiny run cap forces the watchdog to fire.
+    set_playlist "SLOW1"
+    export MOCK_CLAUDE_SLEEP=3
+    export YOUTUBE_INGEST_RUN_TIMEOUT=1
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"run watchdog: fan-out exceeded 1s"* ]]
+}
+
 @test "build-index runs after a successful pass" {
     set_playlist "VID200"
 

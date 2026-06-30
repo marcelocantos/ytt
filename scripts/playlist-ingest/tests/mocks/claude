@@ -43,6 +43,11 @@ if [[ ",${MOCK_CLAUDE_NO_WRITE:-}," == *",$ID,"* ]]; then
     exit 0
 fi
 
+# Optional artificial delay (exercises the run-level watchdog).
+if [[ -n "${MOCK_CLAUDE_SLEEP:-}" ]]; then
+    sleep "$MOCK_CLAUDE_SLEEP"
+fi
+
 SLUG="mock-synopsis-$ID.md"
 cat > "$DIR/$SLUG" <<EOF
 # Mock title $ID
