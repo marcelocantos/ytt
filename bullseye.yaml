@@ -135,3 +135,21 @@ targets:
     origin: manual
     discovered: 2026-06-16
     achieved: 2026-06-21
+  T5:
+    name: Scheduled ingest survives network-unavailable fire times and never mistakes a failed discovery for "nothing new"
+    status: achieved
+    value: 4.0
+    cost: 1.0
+    actual_cost: 1.0
+    acceptance:
+    - The run waits (bounded) for connectivity before discovery, so a launchd tick that fires in a DarkWake window with no Wi-Fi defers instead of running blind
+    - A failed playlist enumeration or channel feed fetch is logged as FAILED and counted; it is never reported as "playlist=0" / "nothing new"
+    - A fetch failure while bootstrapping a cursor-less channel skips that channel only — it does not abort the whole run (the set -e command-substitution death)
+    - A "nothing to do" run with discovery failures exits non-zero so launchd's last-exit-code reflects the truth
+    - The playlist argument must be an http(s) URL; -h/--help prints usage instead of becoming the playlist (the --help incident queued 851 lines of yt-dlp usage text as video IDs)
+    - Queued IDs are validated against the YouTube ID charset before fan-out; junk is dropped loudly
+    context: |-
+      Between 2026-06-28 and 2026-07-02 every 06:30 launchd run fired while the laptop slept: launchd defers the calendar tick to the next wake, usually a DarkWake maintenance window with no Wi-Fi association, so every DNS lookup failed. The playlist logged "playlist=0 pending=0" and channels logged "nothing new" — discovery failure was indistinguishable from no-new-content. Adding the cursor-less @t3dotgg channel on 2026-07-01 upgraded the blindness to a hard crash: its bootstrap `latest=$(yt-dlp ...)` assignment under set -e killed the run on fetch failure. Separately, `ingest.sh --help` (run 2026-07-01) treated "--help" as the playlist URL and queued yt-dlp's usage text as video IDs.
+    origin: manual
+    discovered: 2026-07-02
+    achieved: 2026-07-02

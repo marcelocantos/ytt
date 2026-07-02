@@ -2,7 +2,8 @@
 # Ingest new videos from a YouTube playlist and from tracked channels.
 #
 # Usage: ingest.sh [PLAYLIST_URL]
-#   PLAYLIST_URL defaults to $YOUTUBE_INGEST_PLAYLIST.
+#   PLAYLIST_URL defaults to $YOUTUBE_INGEST_PLAYLIST and must be an
+#   http(s) URL. -h/--help prints this header.
 #
 # Sources:
 #   1. The playlist named by PLAYLIST_URL / $YOUTUBE_INGEST_PLAYLIST.
@@ -24,12 +25,33 @@
 #
 # Concurrency: $YOUTUBE_INGEST_CONCURRENCY (default 4).
 # Output:      $YOUTUBE_INGEST_ROOT     (default ~/think/knowledge/youtube)
+# Network:     the run waits for connectivity before discovery — the daily
+#              launchd tick usually fires in a DarkWake maintenance window
+#              with no Wi-Fi, where every DNS lookup fails.
+#              $YOUTUBE_INGEST_NETWORK_WAIT caps the wait (default 14400s);
+#              $YOUTUBE_INGEST_NETWORK_POLL sets the poll interval (default 60s).
 
 set -euo pipefail
+
+case "${1:-}" in
+    -h|--help)
+        # The header comment doubles as the usage text.
+        awk 'NR == 1 {next} !/^#/ {exit} {sub(/^# ?/, ""); print}' "$0"
+        exit 0
+        ;;
+esac
 
 PLAYLIST="${1:-${YOUTUBE_INGEST_PLAYLIST:-}}"
 if [[ -z "$PLAYLIST" ]]; then
     echo "error: playlist URL required (arg or \$YOUTUBE_INGEST_PLAYLIST)" >&2
+    exit 2
+fi
+# Anything that isn't an http(s) URL — a stray flag, a bare word — must never
+# reach yt-dlp as the playlist: `ingest.sh --help` once became
+# playlist="--help", yt-dlp printed its own help text, and 851 lines of usage
+# output were queued as "video IDs" for ingest.
+if [[ "$PLAYLIST" != http://* && "$PLAYLIST" != https://* ]]; then
+    echo "error: playlist must be an http(s) URL, got: $PLAYLIST" >&2
     exit 2
 fi
 
@@ -77,6 +99,42 @@ with_timeout() {
 
 log "playlist=$PLAYLIST root=$ROOT concurrency=$CONCURRENCY"
 
+# Wait for network before any discovery. The daily launchd tick usually fires
+# while the laptop sleeps: launchd defers it to the next wake, which is often
+# a DarkWake maintenance window with no Wi-Fi association — every DNS lookup
+# fails, and (worse) a failed feed fetch is indistinguishable from an empty
+# one. Rather than run blind, park here until connectivity appears; the run
+# effectively defers until the machine properly wakes. The wait counts
+# awake-time only (sleep(1) doesn't tick while the machine sleeps) and is
+# bounded so a network that never returns gives up loudly, leaving the retry
+# to the next scheduled run.
+NETWORK_WAIT="${YOUTUBE_INGEST_NETWORK_WAIT:-14400}"   # 4 hours
+NETWORK_POLL="${YOUTUBE_INGEST_NETWORK_POLL:-60}"
+(( NETWORK_POLL > 0 )) || NETWORK_POLL=1
+network_up() {
+    curl -fsI --max-time 10 -o /dev/null https://www.youtube.com/robots.txt
+}
+WAITED=0
+until network_up; do
+    if (( WAITED >= NETWORK_WAIT )); then
+        log "network still unreachable after ${WAITED}s of waiting; giving up (next scheduled run retries)"
+        exit 1
+    fi
+    if (( WAITED == 0 )); then
+        log "network unreachable; waiting up to ${NETWORK_WAIT}s for connectivity"
+    fi
+    sleep "$NETWORK_POLL"
+    WAITED=$((WAITED + NETWORK_POLL))
+done
+if (( WAITED > 0 )); then
+    log "network up after ${WAITED}s; proceeding"
+fi
+
+# Every discovery source that fails (as opposed to legitimately coming back
+# empty) bumps this. Failures must be loud: a run that discovered nothing
+# because the network dropped is NOT a run that found nothing new.
+DISCOVERY_FAILURES=0
+
 # Heal orphan dirs from previous failed runs. The .processed file is the
 # authoritative record of successful ingest; any per-video dir that exists
 # without being in .processed was killed mid-run, had its synopsis step
@@ -97,9 +155,16 @@ if (( ${#ORPHAN_NEW[@]} > 0 )); then
 fi
 
 # Collect new IDs from the playlist.
-mapfile -t PLAYLIST_IDS < <(
-    with_timeout 120 yt-dlp --flat-playlist --print id --playlist-reverse "$PLAYLIST"
-)
+PLAYLIST_IDS=()
+PLAYLIST_LIST="$(mktemp)"
+if with_timeout 120 yt-dlp --flat-playlist --print id --playlist-reverse "$PLAYLIST" >"$PLAYLIST_LIST"; then
+    mapfile -t PLAYLIST_IDS <"$PLAYLIST_LIST"
+else
+    rc=$?
+    DISCOVERY_FAILURES=$((DISCOVERY_FAILURES + 1))
+    log "playlist enumeration FAILED (rc=$rc); playlist skipped this run"
+fi
+rm -f "$PLAYLIST_LIST"
 
 PLAYLIST_NEW=()
 for ID in "${PLAYLIST_IDS[@]}"; do
@@ -128,7 +193,17 @@ if [[ -f "$CHANNELS_FILE" ]]; then
         discovered="$CHANNELS_DIR/$handle.discovered"
 
         if [[ ! -f "$marker" ]]; then
-            latest=$(with_timeout 120 yt-dlp --flat-playlist --playlist-end 1 --print id "$url" 2>/dev/null)
+            # The `|| rc=$?` guard matters: a bare `latest=$(...)` assignment
+            # under `set -e` aborts the WHOLE RUN when the fetch fails — one
+            # new channel added while the network was down used to kill every
+            # scheduled run at bootstrap.
+            rc=0
+            latest=$(with_timeout 120 yt-dlp --flat-playlist --playlist-end 1 --print id "$url" 2>/dev/null) || rc=$?
+            if (( rc != 0 )); then
+                DISCOVERY_FAILURES=$((DISCOVERY_FAILURES + 1))
+                log "channel @$handle: feed fetch FAILED (rc=$rc); skipping this run"
+                continue
+            fi
             if [[ -z "$latest" ]]; then
                 log "channel @$handle: empty feed"
                 continue
@@ -157,17 +232,28 @@ if [[ -f "$CHANNELS_FILE" ]]; then
 
         pending_for_channel=()
         walked=0
+        feed_rc_file="$(mktemp)"
         while IFS= read -r ID; do
             walked=$((walked + 1))
             (( walked > CHANNEL_WALK_LIMIT )) && break
             $cursor_trusted && [[ "$ID" == "$cursor" ]] && break
             grep -Fxq -- "$ID" "$STATE" && continue
             pending_for_channel+=("$ID")
-        done < <(with_timeout 120 yt-dlp --flat-playlist --lazy-playlist --print id "$url" 2>/dev/null)
+        done < <(with_timeout 120 yt-dlp --flat-playlist --lazy-playlist --print id "$url" 2>/dev/null; printf '%s' "$?" >"$feed_rc_file")
+        feed_rc="$(cat "$feed_rc_file" 2>/dev/null || printf '0')"
+        rm -f "$feed_rc_file"
 
         if (( ${#pending_for_channel[@]} > 0 )); then
             printf '%s\n' "${pending_for_channel[@]}" > "$discovered"
             log "channel @$handle: pending=${#pending_for_channel[@]} (cursor advance deferred to post-fan-out)"
+        elif (( walked == 0 )) && [[ "$feed_rc" != 0 ]]; then
+            # Zero lines read AND a non-zero fetch exit ⇒ the fetch itself
+            # failed; "nothing new" would be a lie. (walked==0 also guards the
+            # rc read: only on EOF is the feed_rc_file guaranteed complete —
+            # the early-break paths above leave the fetch mid-flight, but they
+            # always read at least one line first.)
+            DISCOVERY_FAILURES=$((DISCOVERY_FAILURES + 1))
+            log "channel @$handle: feed fetch FAILED (rc=$feed_rc); skipping this run"
         else
             log "channel @$handle: nothing new"
         fi
@@ -218,7 +304,25 @@ mapfile -t NEW < <(
 )
 if [[ -n "$PLAYLIST_PENDING" ]]; then rm -f "$PLAYLIST_PENDING"; fi
 
+# Defense-in-depth: YouTube video IDs contain only [A-Za-z0-9_-]. Anything
+# else in the queue means a source fed us junk (the --help incident queued
+# yt-dlp usage lines like "Options:" as IDs) — drop it loudly rather than
+# fan out an ingest worker on it.
+SANE=()
+for ID in "${NEW[@]}"; do
+    if [[ "$ID" =~ ^[A-Za-z0-9_-]+$ ]]; then
+        SANE+=("$ID")
+    else
+        log "dropping junk id from queue: $ID"
+    fi
+done
+NEW=("${SANE[@]}")
+
 if (( ${#NEW[@]} == 0 )); then
+    if (( DISCOVERY_FAILURES > 0 )); then
+        log "nothing to do — but $DISCOVERY_FAILURES discovery source(s) FAILED; results incomplete"
+        exit 1
+    fi
     log "nothing to do"
     exit 0
 fi
@@ -290,6 +394,9 @@ if $SPEND_LIMITED; then
     log "done: $INGESTED ingested, $FAILED deferred (Claude spend limit hit — run cut short; remainder retries next run)"
 else
     log "done: $INGESTED ingested, $FAILED failed"
+fi
+if (( DISCOVERY_FAILURES > 0 )); then
+    log "warning: $DISCOVERY_FAILURES discovery source(s) FAILED this run; anything they held surfaces next run"
 fi
 
 # Refresh the knowledge-base index whenever new synopses landed. Without

@@ -182,3 +182,95 @@ load lib
     ! grep -Fxq -- "BROKEN" "$ROOT/.processed" 2>/dev/null
     [ ! -f "$ROOT/.channels/failchan" ]
 }
+
+@test "--help prints usage and touches nothing" {
+    run_ingest --help
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Usage: ingest.sh"* ]]
+    [ ! -s "$ROOT/.processed" ]
+}
+
+@test "non-URL playlist argument is rejected (the --help-as-playlist incident)" {
+    run_ingest --frobnicate
+
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"playlist must be an http(s) URL"* ]]
+}
+
+@test "network gate: unreachable network gives up loudly instead of running blind" {
+    export MOCK_CURL_FAIL=1
+    export YOUTUBE_INGEST_NETWORK_WAIT=0
+    set_playlist "VID300"
+
+    run_ingest
+
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"network still unreachable"* ]]
+    ! grep -Fxq -- "VID300" "$ROOT/.processed" 2>/dev/null
+}
+
+@test "network gate: run proceeds once connectivity returns" {
+    export MOCK_CURL_FAIL_COUNT=2
+    export YOUTUBE_INGEST_NETWORK_POLL=1
+    set_playlist "VID301"
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"network up after"* ]]
+    grep -Fxq -- "VID301" "$ROOT/.processed"
+}
+
+@test "playlist enumeration failure is loud — never mistaken for an empty playlist" {
+    export MOCK_YT_DLP_PLAYLIST_FAIL=1
+
+    run_ingest
+
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"playlist enumeration FAILED"* ]]
+    [[ "$output" == *"discovery source(s) FAILED; results incomplete"* ]]
+}
+
+@test "channel bootstrap fetch failure skips the channel, not the run" {
+    # Regression: a channel with no cursor whose feed fetch fails used to
+    # abort the whole script (bare command-substitution assignment under
+    # set -e) — killing every scheduled run the morning after a new channel
+    # was added while the network was down.
+    channels_with "@deadchan" "@livechan"
+    export MOCK_YT_DLP_CHANNEL_FAIL="deadchan"
+    set_channel livechan LIVE1
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"channel @deadchan: feed fetch FAILED"* ]]
+    grep -Fxq -- "LIVE1" "$ROOT/.processed"
+    [ ! -f "$ROOT/.channels/deadchan" ]
+}
+
+@test "channel steady-state fetch failure is loud, not 'nothing new'" {
+    channels_with "@flakychan"
+    mark_processed "PREV"
+    set_cursor flakychan PREV
+    export MOCK_YT_DLP_CHANNEL_FAIL="flakychan"
+
+    run_ingest
+
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"channel @flakychan: feed fetch FAILED"* ]]
+    [[ "$output" != *"channel @flakychan: nothing new"* ]]
+    [ "$(cat "$ROOT/.channels/flakychan")" = "PREV" ]
+}
+
+@test "junk ids from a corrupted source are dropped; real ones still ingest" {
+    set_playlist "GOOD1 Options: [OPTIONS]"
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"dropping junk id from queue: Options:"* ]]
+    [[ "$output" == *"dropping junk id from queue: [OPTIONS]"* ]]
+    grep -Fxq -- "GOOD1" "$ROOT/.processed"
+    [ ! -d "$ROOT/Options:" ]
+}

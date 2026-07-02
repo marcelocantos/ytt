@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Mock curl — stands in for ingest.sh's network-up probe.
+#
+# Inputs (via env):
+#   MOCK_CURL_FAIL        — non-empty: every call fails (exit 6, "could not
+#                           resolve host", what a DarkWake DNS failure yields)
+#   MOCK_CURL_FAIL_COUNT  — fail the first N calls, then succeed (call count
+#                           persisted in $YOUTUBE_INGEST_ROOT/.curl-calls)
+
+set -e
+
+if [[ -n "${MOCK_CURL_FAIL:-}" ]]; then
+    exit 6
+fi
+
+if [[ -n "${MOCK_CURL_FAIL_COUNT:-}" ]]; then
+    count_file="${YOUTUBE_INGEST_ROOT:?}/.curl-calls"
+    calls=$(cat "$count_file" 2>/dev/null || echo 0)
+    calls=$((calls + 1))
+    printf '%s' "$calls" >"$count_file"
+    if (( calls <= MOCK_CURL_FAIL_COUNT )); then
+        exit 6
+    fi
+fi
+
+exit 0
