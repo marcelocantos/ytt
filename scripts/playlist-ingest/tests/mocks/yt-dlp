@@ -3,8 +3,11 @@
 #
 # Inputs (via env):
 #   MOCK_YT_DLP_PLAYLIST_IDS       — space-separated IDs for the playlist
+#   MOCK_YT_DLP_PLAYLIST_FAIL      — non-empty: playlist listing exits 1
 #   MOCK_YT_DLP_CHANNEL_<HANDLE>   — space-separated IDs for that channel
 #                                    (HANDLE = uppercased, alnum-only)
+#   MOCK_YT_DLP_CHANNEL_FAIL       — comma-separated handles whose feed
+#                                    fetch exits 1
 #   MOCK_YT_DLP_META_FAIL          — comma-separated IDs to fail meta for
 
 set -e
@@ -42,12 +45,20 @@ handle_for() {
 
 if [[ "$URL" == *playlist?list=* || "$URL" == *playlist*list=* ]]; then
     # Playlist listing.
+    if [[ -n "${MOCK_YT_DLP_PLAYLIST_FAIL:-}" ]]; then
+        echo "mock yt-dlp: forced playlist failure" >&2
+        exit 1
+    fi
     for id in ${MOCK_YT_DLP_PLAYLIST_IDS:-}; do
         printf '%s\n' "$id"
     done
 elif [[ "$URL" == *@*/videos* ]]; then
     # Channel feed.
     handle="$(handle_for "$URL")"
+    if [[ ",${MOCK_YT_DLP_CHANNEL_FAIL:-}," == *",$handle,"* ]]; then
+        echo "mock yt-dlp: forced channel failure for @$handle" >&2
+        exit 1
+    fi
     var="MOCK_YT_DLP_CHANNEL_$(printf '%s' "$handle" | tr -c '[:alnum:]' _)"
     ids="${!var:-}"
     if [[ -n "$PLAYLIST_END" ]]; then
