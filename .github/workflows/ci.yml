@@ -20,7 +20,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install
-        run: pip install -e .
+        run: pip install -e ".[test]"
 
       - name: --version
         run: |
@@ -45,29 +45,8 @@ jobs:
           set -e
           [[ $rc -eq 2 ]]
 
-      - name: extract_video_id unit check
-        run: |
-          python -c "
-          from ytt import extract_video_id
-          assert extract_video_id('dQw4w9WgXcQ') == 'dQw4w9WgXcQ'
-          assert extract_video_id('https://www.youtube.com/watch?v=dQw4w9WgXcQ') == 'dQw4w9WgXcQ'
-          assert extract_video_id('https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=30s') == 'dQw4w9WgXcQ'
-          assert extract_video_id('https://youtu.be/dQw4w9WgXcQ') == 'dQw4w9WgXcQ'
-          assert extract_video_id('https://youtu.be/dQw4w9WgXcQ?t=30') == 'dQw4w9WgXcQ'
-          assert extract_video_id('https://youtube.com/shorts/dQw4w9WgXcQ') == 'dQw4w9WgXcQ'
-          print('extract_video_id: OK')
-          "
-
-      - name: format_timestamp unit check
-        run: |
-          python -c "
-          from ytt import format_timestamp
-          assert format_timestamp(0) == '[00:00]'
-          assert format_timestamp(65) == '[01:05]'
-          assert format_timestamp(3600) == '[1:00:00]'
-          assert format_timestamp(3661) == '[1:01:01]'
-          print('format_timestamp: OK')
-          "
+      - name: pytest
+        run: pytest -q
 
   build:
     runs-on: ubuntu-latest

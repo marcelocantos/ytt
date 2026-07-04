@@ -57,7 +57,9 @@ fi
 
 ROOT="${YOUTUBE_INGEST_ROOT:-$HOME/think/knowledge/youtube}"
 STATE="$ROOT/.processed"
-LOG="$ROOT/.ingest.log"
+# Log defaults into the content tree for manual use; the scheduled runner
+# points $YOUTUBE_INGEST_LOG outside it so scheduled churn doesn't commit.
+LOG="${YOUTUBE_INGEST_LOG:-$ROOT/.ingest.log}"
 CHANNELS_DIR="$ROOT/.channels"
 CONCURRENCY="${YOUTUBE_INGEST_CONCURRENCY:-4}"
 # Run-level watchdog: a hard cap on the whole fan-out. The per-call timeouts
@@ -80,7 +82,7 @@ mkdir -p "$ROOT" "$CHANNELS_DIR"
 touch "$STATE" "$LOG"
 
 log() {
-    printf '[%s] %s\n' "$(date -u +%H:%M:%SZ)" "$*" | tee -a "$LOG" >&2
+    printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$LOG" >&2
 }
 
 # Hard-timeout wrapper for the yt-dlp discovery calls below — a stalled
@@ -111,6 +113,12 @@ log "playlist=$PLAYLIST root=$ROOT concurrency=$CONCURRENCY"
 NETWORK_WAIT="${YOUTUBE_INGEST_NETWORK_WAIT:-14400}"   # 4 hours
 NETWORK_POLL="${YOUTUBE_INGEST_NETWORK_POLL:-60}"
 (( NETWORK_POLL > 0 )) || NETWORK_POLL=1
+# Without this preflight, a missing curl exits 127 inside network_up and the
+# gate loops for the full NETWORK_WAIT looking exactly like a network outage.
+if ! command -v curl >/dev/null; then
+    log "curl not found on PATH — cannot probe network reachability; aborting"
+    exit 1
+fi
 network_up() {
     curl -fsI --max-time 10 -o /dev/null https://www.youtube.com/robots.txt
 }
@@ -232,26 +240,46 @@ if [[ -f "$CHANNELS_FILE" ]]; then
 
         pending_for_channel=()
         walked=0
+        ended_early=false
         feed_rc_file="$(mktemp)"
         while IFS= read -r ID; do
             walked=$((walked + 1))
-            (( walked > CHANNEL_WALK_LIMIT )) && break
-            $cursor_trusted && [[ "$ID" == "$cursor" ]] && break
+            (( walked > CHANNEL_WALK_LIMIT )) && { ended_early=true; break; }
+            $cursor_trusted && [[ "$ID" == "$cursor" ]] && { ended_early=true; break; }
             grep -Fxq -- "$ID" "$STATE" && continue
             pending_for_channel+=("$ID")
         done < <(with_timeout 120 yt-dlp --flat-playlist --lazy-playlist --print id "$url" 2>/dev/null; printf '%s' "$?" >"$feed_rc_file")
-        feed_rc="$(cat "$feed_rc_file" 2>/dev/null || printf '0')"
+        feed_rc="$(cat "$feed_rc_file" 2>/dev/null || printf '1')"
         rm -f "$feed_rc_file"
+
+        # Only the EOF path may consult feed_rc: on EOF the subshell has
+        # exited, so the rc file is complete. The early-break paths leave the
+        # fetch mid-flight (its rc would be a SIGPIPE artefact anyway) — but
+        # they ended the walk by design, so the feed was NOT truncated.
+        feed_truncated=false
+        if ! $ended_early && [[ "$feed_rc" != 0 ]]; then
+            feed_truncated=true
+        fi
 
         if (( ${#pending_for_channel[@]} > 0 )); then
             printf '%s\n' "${pending_for_channel[@]}" > "$discovered"
-            log "channel @$handle: pending=${#pending_for_channel[@]} (cursor advance deferred to post-fan-out)"
-        elif (( walked == 0 )) && [[ "$feed_rc" != 0 ]]; then
-            # Zero lines read AND a non-zero fetch exit ⇒ the fetch itself
-            # failed; "nothing new" would be a lie. (walked==0 also guards the
-            # rc read: only on EOF is the feed_rc_file guaranteed complete —
-            # the early-break paths above leave the fetch mid-flight, but they
-            # always read at least one line first.)
+            if $feed_truncated; then
+                # The feed died mid-stream: videos may exist between the old
+                # cursor and the truncation point that this walk never saw.
+                # Ingest what we found, but pin the cursor — advancing it past
+                # unseen videos would skip them forever. The marker tells the
+                # post-fan-out step to hold; next run re-walks from the same
+                # cursor and rediscovers anything missed (dedup by .processed).
+                : > "$discovered.partial"
+                DISCOVERY_FAILURES=$((DISCOVERY_FAILURES + 1))
+                log "channel @$handle: pending=${#pending_for_channel[@]} but feed walk TRUNCATED mid-stream (rc=$feed_rc) — cursor pinned; full re-walk next run"
+            else
+                rm -f "$discovered.partial"
+                log "channel @$handle: pending=${#pending_for_channel[@]} (cursor advance deferred to post-fan-out)"
+            fi
+        elif $feed_truncated; then
+            # Nothing (usable) read and the fetch failed ⇒ "nothing new"
+            # would be a lie.
             DISCOVERY_FAILURES=$((DISCOVERY_FAILURES + 1))
             log "channel @$handle: feed fetch FAILED (rc=$feed_rc); skipping this run"
         else
@@ -304,13 +332,13 @@ mapfile -t NEW < <(
 )
 if [[ -n "$PLAYLIST_PENDING" ]]; then rm -f "$PLAYLIST_PENDING"; fi
 
-# Defense-in-depth: YouTube video IDs contain only [A-Za-z0-9_-]. Anything
-# else in the queue means a source fed us junk (the --help incident queued
-# yt-dlp usage lines like "Options:" as IDs) — drop it loudly rather than
-# fan out an ingest worker on it.
+# Defense-in-depth: a YouTube video ID is exactly 11 chars of [A-Za-z0-9_-].
+# Anything else in the queue means a source fed us junk (the --help incident
+# queued yt-dlp usage lines like "Options:" as IDs) — drop it loudly rather
+# than fan out an ingest worker on it.
 SANE=()
 for ID in "${NEW[@]}"; do
-    if [[ "$ID" =~ ^[A-Za-z0-9_-]+$ ]]; then
+    if [[ "$ID" =~ ^[A-Za-z0-9_-]{11}$ ]]; then
         SANE+=("$ID")
     else
         log "dropping junk id from queue: $ID"
@@ -371,6 +399,11 @@ shopt -s nullglob
 for discovered in "$CHANNELS_DIR"/*.discovered; do
     handle="$(basename "$discovered" .discovered)"
     marker="$CHANNELS_DIR/$handle"
+    if [[ -f "$discovered.partial" ]]; then
+        log "channel @$handle: cursor unchanged (feed walk truncated; full re-walk next run)"
+        rm -f "$discovered" "$discovered.partial"
+        continue
+    fi
     mapfile -t ids < "$discovered"
     new_cursor=""
     for ((i = ${#ids[@]} - 1; i >= 0; i--)); do

@@ -19,16 +19,32 @@
 set -euo pipefail
 
 ID="${1:?video id required}"
+# Validate at the point of danger: $ID lands in `rm -rf "$ROOT/$ID"` on every
+# failure path below, so a malformed argument (path fragment, usage text from
+# a corrupted queue) must die here, not there. Real YouTube IDs are exactly
+# 11 chars of [A-Za-z0-9_-].
+if [[ ! "$ID" =~ ^[A-Za-z0-9_-]{11}$ ]]; then
+    printf 'ingest-one: invalid video id: %s\n' "$ID" >&2
+    exit 2
+fi
 ROOT="${YOUTUBE_INGEST_ROOT:-$HOME/think/knowledge/youtube}"
 STATE="$ROOT/.processed"
-LOG="$ROOT/.ingest.log"
+# Log defaults into the content tree for standalone/manual use, but the
+# scheduled runner points $YOUTUBE_INGEST_LOG outside it so scheduled churn
+# doesn't land as commits in ~/think.
+LOG="${YOUTUBE_INGEST_LOG:-$ROOT/.ingest.log}"
 DIR="$ROOT/$ID"
 URL="https://www.youtube.com/watch?v=$ID"
+# Pin which `ytt` this pipeline runs. Unset ⇒ PATH lookup (the standalone
+# default); the scheduled runner sets it to an absolute path so launchd and an
+# interactive shell can't resolve two different ytt builds (the skew behind the
+# June --json outage).
+YTT_BIN="${YOUTUBE_INGEST_YTT_BIN:-ytt}"
 
 log() {
     # Single-shot printf is atomic for short lines (< PIPE_BUF) on POSIX,
     # so concurrent workers can append to the same log safely.
-    printf '[%s] [%s] %s\n' "$(date -u +%H:%M:%SZ)" "$ID" "$*" >>"$LOG"
+    printf '[%s] [%s] %s\n' "$(date -u +%FT%TZ)" "$ID" "$*" >>"$LOG"
 }
 
 # Hard-timeout wrapper for the network / LLM calls below. A stalled connection
@@ -123,7 +139,7 @@ max_attempts="${YOUTUBE_INGEST_FETCH_RETRIES:-3}"
 while :; do
     throttle
     rc=0
-    err=$(with_timeout 120 ytt --json "$URL" 2>&1 >"$RAW") || rc=$?
+    err=$(with_timeout 120 "$YTT_BIN" --json "$URL" 2>&1 >"$RAW") || rc=$?
     if (( rc == 0 )); then
         break
     fi
@@ -165,6 +181,19 @@ fi
 
 TITLE=$(jq -r '.title // "(unknown)"' "$DIR/meta.json" 2>/dev/null || echo "(unknown)")
 
+# The output format is defined once, in synopsis-contract.md next to this
+# script (bundled into libexec alongside it by the brew formula). Read it and
+# append it verbatim so the scheduled path and the interactive /ytt skill — the
+# other consumer of that file — can never drift from each other or from the
+# build-index.sh parser.
+CONTRACT_FILE="$(cd "$(dirname "$0")" && pwd)/synopsis-contract.md"
+if [[ ! -f "$CONTRACT_FILE" ]]; then
+    log "synopsis contract not found at $CONTRACT_FILE; cleaning up"
+    rm -rf "$DIR"
+    exit 1
+fi
+CONTRACT=$(<"$CONTRACT_FILE")
+
 PROMPT=$(cat <<EOF
 Read the transcript at $DIR/.transcript/transcript.json (YouTube video:
 "$TITLE", $URL). The file is the full youtube-transcript-api payload:
@@ -173,43 +202,16 @@ a snippets array of {text, start, duration}. Join snippet text in order
 for the prose; you may cite [mm:ss] timestamps (from snippet.start) in
 Key Takeaways when a moment is worth pinning to.
 
-Produce a detailed synopsis and key takeaways following the /ytt skill's
-output format (multi-paragraph synopsis covering full content in logical
-order, then a bulleted Key Takeaways list).
-
-Choose a topic-based filename slug for the output. Requirements:
-
-- 2–6 words, kebab-case, lowercase ASCII, ending in ".md"
-- Describes the actual subject matter — not the literal video title
-  (titles are often clickbaity). Read like a useful node label in an
-  Obsidian graph view; reading the slug alone should hint at the topic.
-- Favour the substantive topic over personalities/sensationalism.
-- Must NOT begin with "transcript" (reserved).
-
-Write the synopsis to \$DIR/<slug>.md (where \$DIR is $DIR), with this
-exact structure:
-
-  # $TITLE
-
-  Source: $URL
-
-  **TL;DR**: <one sentence — what the video is about and its central
-  point. Self-contained: a reader scanning a list of TL;DRs should be
-  able to decide whether to open this one. Single line, no line breaks.>
-
-  ## Synopsis
-
-  <multi-paragraph synopsis as described above>
-
-  ## Key Takeaways
-
-  <bulleted list>
-
-The TL;DR line is consumed by an index generator — keep it on a single
-line, prefixed exactly with "**TL;DR**: ".
+Produce a detailed synopsis and key takeaways for this video, following
+the output format defined below. Fill "<video title>" with "$TITLE" and
+"<youtube URL>" with $URL. Write the result to \$DIR/<slug>.md, where
+\$DIR is $DIR and <slug> is the filename slug you choose per the contract.
 
 Do not write anything else to disk. Reply with just the slug filename
 (e.g. "claude-desktop-project-features.md") when finished — nothing else.
+
+-----8<----- output format contract -----8<-----
+$CONTRACT
 EOF
 )
 
@@ -220,10 +222,13 @@ EOF
 # of the batch instead of paced-fetching transcripts for hours only to fail
 # each synopsis. The undispatched videos simply retry once the budget frees.
 SYNOPSIS_OUT="$DIR/.transcript/synopsis.out"
-if ! printf '%s\n' "$PROMPT" | with_timeout 600 claude -p \
+# The transcript is untrusted input; run Claude with CWD pinned to the video
+# dir so acceptEdits auto-approval can't be steered at files outside $DIR
+# (CWD is always writable to a -p session, wherever the worker was launched).
+if ! printf '%s\n' "$PROMPT" | ( cd "$DIR" && with_timeout 600 claude -p \
     --permission-mode acceptEdits \
     --allowedTools "Read,Write" \
-    --add-dir "$DIR" >"$SYNOPSIS_OUT" 2>&1; then
+    --add-dir "$DIR" ) >"$SYNOPSIS_OUT" 2>&1; then
     cat "$SYNOPSIS_OUT" >>"$LOG"
     if grep -qiE 'monthly spend limit|usage limit|spend(ing)? limit|claude\.ai/settings/usage' "$SYNOPSIS_OUT"; then
         : > "$ROOT/.spend-limit"   # marker: tell the parent the run was cut short

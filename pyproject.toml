@@ -29,6 +29,9 @@ dependencies = [
   "youtube-transcript-api>=1.0",
 ]
 
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
 [project.urls]
 Homepage = "https://github.com/marcelocantos/ytt"
 Repository = "https://github.com/marcelocantos/ytt"
