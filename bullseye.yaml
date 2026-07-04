@@ -84,7 +84,7 @@ targets:
     achieved: 2026-04-29
   T10:
     name: A truncated channel-feed walk cannot advance a cursor past unseen videos
-    status: identified
+    status: achieved
     value: 0.0
     cost: 0.0
     acceptance:
@@ -93,6 +93,7 @@ targets:
     context: 'Pre-existing hazard found in the PR-15 review (finding 6): walked>0 with a non-zero feed rc is treated as a complete discovery. Low probability (walk depth is usually 1-3, single API page) but same failure family as the outage — partial failure read as success. Fix trades against the --lazy-playlist early-exit optimisation; needs a design decision, not a hotfix.'
     origin: manual
     discovered: 2026-07-04
+    achieved: 2026-07-04
   T2:
     name: Homebrew formula declares yt-dlp, jq, and yq as runtime deps so the bundled playlist-ingest scripts work on a clean install
     status: achieved
@@ -177,7 +178,7 @@ targets:
     achieved: 2026-07-02
   T6:
     name: 'The ingest scripts apply the PR-15 review hardening: strict ID validation at both layers, dated logs, curl preflight, fail-loud rc fallback, narrowed synopsis CWD'
-    status: identified
+    status: achieved
     value: 0.0
     cost: 0.0
     acceptance:
@@ -190,6 +191,7 @@ targets:
     context: 'Findings 1-5 of the Fable 5 code review of PR #15 (2026-07-03). The charset-only ID filter was a deliberate concession to readable test fixtures; this target pays that debt properly.'
     origin: manual
     discovered: 2026-07-04
+    achieved: 2026-07-04
   T7:
     name: Nightly ingest runs as a crosshair strategy; the bespoke launchd plist is retired
     status: identified
@@ -219,7 +221,7 @@ targets:
     discovered: 2026-07-04
   T8:
     name: The synopsis contract (TL;DR line, slug rules, file layout) has a single source of truth
-    status: identified
+    status: achieved
     value: 0.0
     cost: 0.0
     acceptance:
@@ -229,9 +231,10 @@ targets:
     context: The contract is currently implemented three times (ingest-one.sh heredoc, /ytt skill, build-index.sh parser+fallback) and has already drifted in behaviour (the skill commits; the pipeline does not).
     origin: manual
     discovered: 2026-07-04
+    achieved: 2026-07-04
   T9:
     name: Python and index-builder tests live in the repo and run locally
-    status: identified
+    status: achieved
     value: 0.0
     cost: 0.0
     acceptance:
@@ -241,3 +244,4 @@ targets:
     context: 'Testing is inverted relative to risk: the bash layer has 27 bats tests while the Python layer''s tests exist only as CI YAML inline asserts (invisible in-repo, not runnable locally) and build-index.sh — which owns the user-facing artifact — has none.'
     origin: manual
     discovered: 2026-07-04
+    achieved: 2026-07-04
