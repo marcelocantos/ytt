@@ -285,3 +285,32 @@ load lib
     [[ "$output" == *"invalid video id"* ]]
     [ ! -e "$ROOT/../escape" ]
 }
+
+@test "truncated channel feed: discoveries ingest, cursor pins, next run recovers the rest" {
+    # Feed (newest-first): TRNEW1, TRNEW2, PREV(=cursor). The feed dies after
+    # emitting TRNEW1, so TRNEW2 sits unseen between cursor and truncation
+    # point — advancing the cursor to TRNEW1 would skip it forever.
+    channels_with "@truncchan"
+    set_channel truncchan TRNEW1----- TRNEW2----- PREV-------
+    mark_processed "PREV-------"
+    set_cursor truncchan "PREV-------"
+    export MOCK_YT_DLP_CHANNEL_TRUNCATE="truncchan:1"
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"feed walk TRUNCATED"* ]]
+    grep -Fxq -- "TRNEW1-----" "$ROOT/.processed"
+    ! grep -Fxq -- "TRNEW2-----" "$ROOT/.processed"
+    [ "$(cat "$ROOT/.channels/truncchan")" = "PREV-------" ]
+    [[ "$output" == *"cursor unchanged (feed walk truncated"* ]]
+
+    # A healthy walk next run rediscovers the unseen video and only then
+    # advances the cursor.
+    unset MOCK_YT_DLP_CHANNEL_TRUNCATE
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    grep -Fxq -- "TRNEW2-----" "$ROOT/.processed"
+    [ "$(cat "$ROOT/.channels/truncchan")" = "TRNEW2-----" ]
+}

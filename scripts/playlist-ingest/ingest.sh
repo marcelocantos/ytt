@@ -238,26 +238,46 @@ if [[ -f "$CHANNELS_FILE" ]]; then
 
         pending_for_channel=()
         walked=0
+        ended_early=false
         feed_rc_file="$(mktemp)"
         while IFS= read -r ID; do
             walked=$((walked + 1))
-            (( walked > CHANNEL_WALK_LIMIT )) && break
-            $cursor_trusted && [[ "$ID" == "$cursor" ]] && break
+            (( walked > CHANNEL_WALK_LIMIT )) && { ended_early=true; break; }
+            $cursor_trusted && [[ "$ID" == "$cursor" ]] && { ended_early=true; break; }
             grep -Fxq -- "$ID" "$STATE" && continue
             pending_for_channel+=("$ID")
         done < <(with_timeout 120 yt-dlp --flat-playlist --lazy-playlist --print id "$url" 2>/dev/null; printf '%s' "$?" >"$feed_rc_file")
         feed_rc="$(cat "$feed_rc_file" 2>/dev/null || printf '1')"
         rm -f "$feed_rc_file"
 
+        # Only the EOF path may consult feed_rc: on EOF the subshell has
+        # exited, so the rc file is complete. The early-break paths leave the
+        # fetch mid-flight (its rc would be a SIGPIPE artefact anyway) — but
+        # they ended the walk by design, so the feed was NOT truncated.
+        feed_truncated=false
+        if ! $ended_early && [[ "$feed_rc" != 0 ]]; then
+            feed_truncated=true
+        fi
+
         if (( ${#pending_for_channel[@]} > 0 )); then
             printf '%s\n' "${pending_for_channel[@]}" > "$discovered"
-            log "channel @$handle: pending=${#pending_for_channel[@]} (cursor advance deferred to post-fan-out)"
-        elif (( walked == 0 )) && [[ "$feed_rc" != 0 ]]; then
-            # Zero lines read AND a non-zero fetch exit ⇒ the fetch itself
-            # failed; "nothing new" would be a lie. (walked==0 also guards the
-            # rc read: only on EOF is the feed_rc_file guaranteed complete —
-            # the early-break paths above leave the fetch mid-flight, but they
-            # always read at least one line first.)
+            if $feed_truncated; then
+                # The feed died mid-stream: videos may exist between the old
+                # cursor and the truncation point that this walk never saw.
+                # Ingest what we found, but pin the cursor — advancing it past
+                # unseen videos would skip them forever. The marker tells the
+                # post-fan-out step to hold; next run re-walks from the same
+                # cursor and rediscovers anything missed (dedup by .processed).
+                : > "$discovered.partial"
+                DISCOVERY_FAILURES=$((DISCOVERY_FAILURES + 1))
+                log "channel @$handle: pending=${#pending_for_channel[@]} but feed walk TRUNCATED mid-stream (rc=$feed_rc) — cursor pinned; full re-walk next run"
+            else
+                rm -f "$discovered.partial"
+                log "channel @$handle: pending=${#pending_for_channel[@]} (cursor advance deferred to post-fan-out)"
+            fi
+        elif $feed_truncated; then
+            # Nothing (usable) read and the fetch failed ⇒ "nothing new"
+            # would be a lie.
             DISCOVERY_FAILURES=$((DISCOVERY_FAILURES + 1))
             log "channel @$handle: feed fetch FAILED (rc=$feed_rc); skipping this run"
         else
@@ -377,6 +397,11 @@ shopt -s nullglob
 for discovered in "$CHANNELS_DIR"/*.discovered; do
     handle="$(basename "$discovered" .discovered)"
     marker="$CHANNELS_DIR/$handle"
+    if [[ -f "$discovered.partial" ]]; then
+        log "channel @$handle: cursor unchanged (feed walk truncated; full re-walk next run)"
+        rm -f "$discovered" "$discovered.partial"
+        continue
+    fi
     mapfile -t ids < "$discovered"
     new_cursor=""
     for ((i = ${#ids[@]} - 1; i >= 0; i--)); do
