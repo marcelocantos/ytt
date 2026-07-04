@@ -140,6 +140,27 @@ $YOUTUBE_INGEST_ROOT/
 | `YOUTUBE_INGEST_ROOT` | `~/think/knowledge/youtube` | Where ingested videos land. |
 | `YOUTUBE_CHANNELS_FILE` | bundled `channels.yaml` | YAML list of channels to track newest-first. |
 | `YOUTUBE_INGEST_CONCURRENCY` | `4` | Parallel video workers. |
+| `YOUTUBE_INGEST_YTT_BIN` | `ytt` (PATH) | Absolute path to the `ytt` used for transcript fetches. Pin it in scheduled runs so launchd and your shell can't resolve two different builds. |
+| `YOUTUBE_INGEST_LOG` | `$YOUTUBE_INGEST_ROOT/.ingest.log` | Ingest log path. Point it outside the content tree for scheduled runs. |
+| `YOUTUBE_INGEST_NETWORK_WAIT` | `14400` | Seconds to wait (awake-time) for connectivity before giving up — covers launchd ticks that fire in a no-network DarkWake window. |
+
+### Scheduling
+
+To run ingest on a daily schedule, install the bundled launchd agent:
+
+```sh
+cp "$(brew --prefix)/libexec/scripts/playlist-ingest/launchd/com.marcelocantos.youtube-ingest.plist" \
+   ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.marcelocantos.youtube-ingest.plist
+```
+
+It runs the installed `ytt ingest` at 06:30 daily, pins the `ytt`
+binary, and writes logs to `~/.local/var/log/youtube-ingest/` (not into
+the content tree). Edit the playlist URL and paths in the plist first;
+they are machine-specific. The scheduled path is deliberately
+network-tolerant: a tick that fires while the machine is asleep or
+between networks waits for connectivity rather than recording a false
+"nothing new".
 
 ### Tracking channels (optional)
 

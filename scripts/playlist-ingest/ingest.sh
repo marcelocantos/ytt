@@ -57,7 +57,9 @@ fi
 
 ROOT="${YOUTUBE_INGEST_ROOT:-$HOME/think/knowledge/youtube}"
 STATE="$ROOT/.processed"
-LOG="$ROOT/.ingest.log"
+# Log defaults into the content tree for manual use; the scheduled runner
+# points $YOUTUBE_INGEST_LOG outside it so scheduled churn doesn't commit.
+LOG="${YOUTUBE_INGEST_LOG:-$ROOT/.ingest.log}"
 CHANNELS_DIR="$ROOT/.channels"
 CONCURRENCY="${YOUTUBE_INGEST_CONCURRENCY:-4}"
 # Run-level watchdog: a hard cap on the whole fan-out. The per-call timeouts

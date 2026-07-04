@@ -29,9 +29,17 @@ if [[ ! "$ID" =~ ^[A-Za-z0-9_-]{11}$ ]]; then
 fi
 ROOT="${YOUTUBE_INGEST_ROOT:-$HOME/think/knowledge/youtube}"
 STATE="$ROOT/.processed"
-LOG="$ROOT/.ingest.log"
+# Log defaults into the content tree for standalone/manual use, but the
+# scheduled runner points $YOUTUBE_INGEST_LOG outside it so scheduled churn
+# doesn't land as commits in ~/think.
+LOG="${YOUTUBE_INGEST_LOG:-$ROOT/.ingest.log}"
 DIR="$ROOT/$ID"
 URL="https://www.youtube.com/watch?v=$ID"
+# Pin which `ytt` this pipeline runs. Unset ⇒ PATH lookup (the standalone
+# default); the scheduled runner sets it to an absolute path so launchd and an
+# interactive shell can't resolve two different ytt builds (the skew behind the
+# June --json outage).
+YTT_BIN="${YOUTUBE_INGEST_YTT_BIN:-ytt}"
 
 log() {
     # Single-shot printf is atomic for short lines (< PIPE_BUF) on POSIX,
@@ -131,7 +139,7 @@ max_attempts="${YOUTUBE_INGEST_FETCH_RETRIES:-3}"
 while :; do
     throttle
     rc=0
-    err=$(with_timeout 120 ytt --json "$URL" 2>&1 >"$RAW") || rc=$?
+    err=$(with_timeout 120 "$YTT_BIN" --json "$URL" 2>&1 >"$RAW") || rc=$?
     if (( rc == 0 )); then
         break
     fi
