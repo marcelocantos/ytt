@@ -212,10 +212,11 @@ targets:
     value: 0.0
     cost: 0.0
     acceptance:
-    - The scheduler plist is committed in the ytt repo (not just a live artifact on one machine)
-    - The scheduled runner pins which ytt binary it invokes (YOUTUBE_INGEST_YTT_BIN / running the installed `ytt ingest`), eliminating the shell(~/.py)-vs-launchd(brew) skew
-    - The scheduled runner writes its logs outside ~/think via YOUTUBE_INGEST_LOG + plist StandardOutPath, and stray content-tree logs are gitignored, so ingest no longer produces auto-sync noise commits
-    - The live plist is updated to the released binary and verified to load
+    - The scheduler plist is committed in the ytt repo (not just a live artifact on one machine).
+    - The scheduled runner pins and preflights both its ytt and Claude executables before discovery, eliminating shell-vs-launchd binary identity skew and missing-CLI worker failures.
+    - Any incomplete run—failed video worker, incomplete discovery, run watchdog expiry, or index-refresh failure—exits non-zero so scheduler state is not falsely green.
+    - The scheduled runner writes its logs outside ~/think via YOUTUBE_INGEST_LOG + plist StandardOutPath, and stray content-tree logs are gitignored, so ingest no longer produces auto-sync noise commits.
+    - The live plist is updated to the released binary and verified to load.
     context: |-
       The crosshair-independent slice of 🎯T7 (see its blocker note). Directly closes two whole-product review findings — binary-identity skew (behind the June --json outage) and content-tree log churn — without retiring the working launchd scheduler.
 
