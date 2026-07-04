@@ -19,6 +19,14 @@
 set -euo pipefail
 
 ID="${1:?video id required}"
+# Validate at the point of danger: $ID lands in `rm -rf "$ROOT/$ID"` on every
+# failure path below, so a malformed argument (path fragment, usage text from
+# a corrupted queue) must die here, not there. Real YouTube IDs are exactly
+# 11 chars of [A-Za-z0-9_-].
+if [[ ! "$ID" =~ ^[A-Za-z0-9_-]{11}$ ]]; then
+    printf 'ingest-one: invalid video id: %s\n' "$ID" >&2
+    exit 2
+fi
 ROOT="${YOUTUBE_INGEST_ROOT:-$HOME/think/knowledge/youtube}"
 STATE="$ROOT/.processed"
 LOG="$ROOT/.ingest.log"
@@ -28,7 +36,7 @@ URL="https://www.youtube.com/watch?v=$ID"
 log() {
     # Single-shot printf is atomic for short lines (< PIPE_BUF) on POSIX,
     # so concurrent workers can append to the same log safely.
-    printf '[%s] [%s] %s\n' "$(date -u +%H:%M:%SZ)" "$ID" "$*" >>"$LOG"
+    printf '[%s] [%s] %s\n' "$(date -u +%FT%TZ)" "$ID" "$*" >>"$LOG"
 }
 
 # Hard-timeout wrapper for the network / LLM calls below. A stalled connection
@@ -220,10 +228,13 @@ EOF
 # of the batch instead of paced-fetching transcripts for hours only to fail
 # each synopsis. The undispatched videos simply retry once the budget frees.
 SYNOPSIS_OUT="$DIR/.transcript/synopsis.out"
-if ! printf '%s\n' "$PROMPT" | with_timeout 600 claude -p \
+# The transcript is untrusted input; run Claude with CWD pinned to the video
+# dir so acceptEdits auto-approval can't be steered at files outside $DIR
+# (CWD is always writable to a -p session, wherever the worker was launched).
+if ! printf '%s\n' "$PROMPT" | ( cd "$DIR" && with_timeout 600 claude -p \
     --permission-mode acceptEdits \
     --allowedTools "Read,Write" \
-    --add-dir "$DIR" >"$SYNOPSIS_OUT" 2>&1; then
+    --add-dir "$DIR" ) >"$SYNOPSIS_OUT" 2>&1; then
     cat "$SYNOPSIS_OUT" >>"$LOG"
     if grep -qiE 'monthly spend limit|usage limit|spend(ing)? limit|claude\.ai/settings/usage' "$SYNOPSIS_OUT"; then
         : > "$ROOT/.spend-limit"   # marker: tell the parent the run was cut short

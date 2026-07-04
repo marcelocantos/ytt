@@ -80,7 +80,7 @@ mkdir -p "$ROOT" "$CHANNELS_DIR"
 touch "$STATE" "$LOG"
 
 log() {
-    printf '[%s] %s\n' "$(date -u +%H:%M:%SZ)" "$*" | tee -a "$LOG" >&2
+    printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$LOG" >&2
 }
 
 # Hard-timeout wrapper for the yt-dlp discovery calls below — a stalled
@@ -111,6 +111,12 @@ log "playlist=$PLAYLIST root=$ROOT concurrency=$CONCURRENCY"
 NETWORK_WAIT="${YOUTUBE_INGEST_NETWORK_WAIT:-14400}"   # 4 hours
 NETWORK_POLL="${YOUTUBE_INGEST_NETWORK_POLL:-60}"
 (( NETWORK_POLL > 0 )) || NETWORK_POLL=1
+# Without this preflight, a missing curl exits 127 inside network_up and the
+# gate loops for the full NETWORK_WAIT looking exactly like a network outage.
+if ! command -v curl >/dev/null; then
+    log "curl not found on PATH — cannot probe network reachability; aborting"
+    exit 1
+fi
 network_up() {
     curl -fsI --max-time 10 -o /dev/null https://www.youtube.com/robots.txt
 }
@@ -240,7 +246,7 @@ if [[ -f "$CHANNELS_FILE" ]]; then
             grep -Fxq -- "$ID" "$STATE" && continue
             pending_for_channel+=("$ID")
         done < <(with_timeout 120 yt-dlp --flat-playlist --lazy-playlist --print id "$url" 2>/dev/null; printf '%s' "$?" >"$feed_rc_file")
-        feed_rc="$(cat "$feed_rc_file" 2>/dev/null || printf '0')"
+        feed_rc="$(cat "$feed_rc_file" 2>/dev/null || printf '1')"
         rm -f "$feed_rc_file"
 
         if (( ${#pending_for_channel[@]} > 0 )); then
@@ -304,13 +310,13 @@ mapfile -t NEW < <(
 )
 if [[ -n "$PLAYLIST_PENDING" ]]; then rm -f "$PLAYLIST_PENDING"; fi
 
-# Defense-in-depth: YouTube video IDs contain only [A-Za-z0-9_-]. Anything
-# else in the queue means a source fed us junk (the --help incident queued
-# yt-dlp usage lines like "Options:" as IDs) — drop it loudly rather than
-# fan out an ingest worker on it.
+# Defense-in-depth: a YouTube video ID is exactly 11 chars of [A-Za-z0-9_-].
+# Anything else in the queue means a source fed us junk (the --help incident
+# queued yt-dlp usage lines like "Options:" as IDs) — drop it loudly rather
+# than fan out an ingest worker on it.
 SANE=()
 for ID in "${NEW[@]}"; do
-    if [[ "$ID" =~ ^[A-Za-z0-9_-]+$ ]]; then
+    if [[ "$ID" =~ ^[A-Za-z0-9_-]{11}$ ]]; then
         SANE+=("$ID")
     else
         log "dropping junk id from queue: $ID"
