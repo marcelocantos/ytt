@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Regenerate the knowledge-base index by scanning all per-video synopsis files.
 #
+# The synopsis format this parser consumes (the TL;DR line prefix, the
+# "single non-transcript *.md" locator) is defined in synopsis-contract.md
+# next to this script — its "Machine contract" section. Change the format
+# there and the parsing here in the same diff.
+#
 # Output: $ROOT/youtube-knowledge-base.md — a two-column markdown table sorted
 # by upload date (newest first). The first column stacks title (linked to the
 # synopsis), channel, and date · duration on three lines; the second column
