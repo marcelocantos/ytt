@@ -201,7 +201,20 @@ targets:
     - Run history (last attempt, last success, consecutive failures, backoff state) is queryable from crosshair's store
     - Ingest logs move out of the git-tracked content tree (no more auto-sync log-noise commits in ~/think)
     - The pipeline pins which ytt binary it invokes, eliminating the shell-vs-launchd binary identity skew
-    context: 'Whole-product review (2026-07-03): the scheduling layer was the least engineered part of the product and where the 5-day outage lived — plist untracked and undocumented, silent failures, hand-rolled retry that crosshair''s backoff ladder provides natively. Crosshair status also feeds the planned Jevons cockpit instrument panel for free.'
+    context: 'BLOCKED on a crosshair capability that does not exist in v0.1.0: crosshair''s tick loop runs any non-terminal strategy target EVERY tick (needs_attempt = !status.is_terminal()); the strategy `trigger` field (e.g. "cron:30 6 * * *") is parsed but never honored. Pointing ingest.sh at a strategy today would run YouTube discovery every tick — the exact burst pattern the pacing design prevents. Fixing T7 cleanly requires crosshair to honor scheduled triggers first (tracked as a target in the crosshair repo, 2026-07-04). The crosshair-independent slice — version-controlling the plist, pinning the ytt binary to kill the shell-vs-launchd skew, and relocating logs out of the git tree — is split into 🎯T7.1 and delivered now. Revisit the crosshair migration once crosshair honors triggers.'
+    origin: manual
+    discovered: 2026-07-04
+  T7.1:
+    name: The launchd scheduler is version-controlled, pins the ytt binary, and keeps logs out of the git-tracked content tree
+    status: identified
+    value: 0.0
+    cost: 0.0
+    acceptance:
+    - The scheduler plist is committed in the ytt repo (not just a live artifact on one machine)
+    - The scheduled runner pins which ytt binary it invokes (YOUTUBE_INGEST_YTT_BIN / running the installed `ytt ingest`), eliminating the shell(~/.py)-vs-launchd(brew) skew
+    - The scheduled runner writes its logs outside ~/think via YOUTUBE_INGEST_LOG + plist StandardOutPath, and stray content-tree logs are gitignored, so ingest no longer produces auto-sync noise commits
+    - The live plist is updated to the released binary and verified to load
+    context: The crosshair-independent slice of 🎯T7 (see its blocker note). Directly closes two whole-product review findings — binary-identity skew (behind the June --json outage) and content-tree log churn — without retiring the working launchd scheduler.
     origin: manual
     discovered: 2026-07-04
   T8:
