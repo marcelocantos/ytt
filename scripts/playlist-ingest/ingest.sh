@@ -85,6 +85,23 @@ log() {
     printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$LOG" >&2
 }
 
+# Resolve the two executables which identify the ingest pipeline before doing
+# network discovery or creating per-video state. launchd deliberately starts
+# with a minimal PATH, so leaving either lookup to a worker turns a missing
+# dependency into a misleading, apparently-successful empty run.
+YTT_BIN="${YOUTUBE_INGEST_YTT_BIN:-ytt}"
+if ! YTT_BIN="$(command -v "$YTT_BIN")"; then
+    log "ytt executable not found: ${YOUTUBE_INGEST_YTT_BIN:-ytt}; aborting"
+    exit 1
+fi
+CLAUDE_BIN="${YOUTUBE_INGEST_CLAUDE_BIN:-claude}"
+if ! CLAUDE_BIN="$(command -v "$CLAUDE_BIN")"; then
+    log "Claude CLI not found: ${YOUTUBE_INGEST_CLAUDE_BIN:-claude}; aborting"
+    exit 1
+fi
+export YOUTUBE_INGEST_YTT_BIN="$YTT_BIN"
+export YOUTUBE_INGEST_CLAUDE_BIN="$CLAUDE_BIN"
+
 # Hard-timeout wrapper for the yt-dlp discovery calls below — a stalled
 # connection (e.g. after the laptop sleeps mid-run) must not wedge the run.
 # macOS lacks GNU timeout; Homebrew coreutils ships it as `timeout`/`gtimeout`.
@@ -435,10 +452,19 @@ fi
 # Refresh the knowledge-base index whenever new synopses landed. Without
 # this the per-video files exist but the user-facing summary page stays
 # frozen — exactly the symptom that prompted this design pass.
+INDEX_OK=true
 if (( INGESTED > 0 )); then
     if "$HERE/build-index.sh" >>"$LOG" 2>&1; then
         log "index refreshed"
     else
         log "index refresh failed (see $LOG)"
+        INDEX_OK=false
     fi
+fi
+
+# launchd has no knowledge of the per-worker log. A partial batch is not a
+# healthy run: return failure so its last-exit-code, and any future scheduler,
+# reflect the pending retry rather than falsely reporting success.
+if (( FAILED > 0 || DISCOVERY_FAILURES > 0 || run_rc != 0 )) || ! $INDEX_OK; then
+    exit 1
 fi

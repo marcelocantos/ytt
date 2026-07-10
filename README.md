@@ -141,6 +141,7 @@ $YOUTUBE_INGEST_ROOT/
 | `YOUTUBE_CHANNELS_FILE` | bundled `channels.yaml` | YAML list of channels to track newest-first. |
 | `YOUTUBE_INGEST_CONCURRENCY` | `4` | Parallel video workers. |
 | `YOUTUBE_INGEST_YTT_BIN` | `ytt` (PATH) | Absolute path to the `ytt` used for transcript fetches. Pin it in scheduled runs so launchd and your shell can't resolve two different builds. |
+| `YOUTUBE_INGEST_CLAUDE_BIN` | `claude` (PATH) | Absolute path to Claude Code used for synopses. Pin it in scheduled runs because launchd has a deliberately minimal PATH. |
 | `YOUTUBE_INGEST_LOG` | `$YOUTUBE_INGEST_ROOT/.ingest.log` | Ingest log path. Point it outside the content tree for scheduled runs. |
 | `YOUTUBE_INGEST_NETWORK_WAIT` | `14400` | Seconds to wait (awake-time) for connectivity before giving up — covers launchd ticks that fire in a no-network DarkWake window. |
 
@@ -185,6 +186,10 @@ falls back to playlist-only mode.
 also runs `claude` (Claude Code CLI). The Homebrew formula declares
 `yt-dlp`, `jq`, and `yq` as `depends_on`; install `claude` separately
 via `npm i -g @anthropic-ai/claude-code` if you want synopses.
+
+The bundled launchd plist pins both `ytt` and `claude` to absolute paths and
+fails the scheduled run if any discovered video does not land, so scheduler
+status reflects an incomplete ingest rather than a misleading successful exit.
 
 ## Requirements
 

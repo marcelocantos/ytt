@@ -64,6 +64,8 @@ settle (see **Playlist-ingest workflow** below).
 | `YOUTUBE_INGEST_ROOT` | `~/think/knowledge/youtube` | Needs review |
 | `YOUTUBE_CHANNELS_FILE` | `<scripts-dir>/channels.yaml` | Fluid |
 | `YOUTUBE_INGEST_CONCURRENCY` | `4` | Stable |
+| `YOUTUBE_INGEST_YTT_BIN` | `ytt` (PATH) | Stable |
+| `YOUTUBE_INGEST_CLAUDE_BIN` | `claude` (PATH) | Stable |
 
 The default `YOUTUBE_INGEST_ROOT` of `~/think/knowledge/youtube` is
 personal-vault-shaped and likely to move to something neutral
