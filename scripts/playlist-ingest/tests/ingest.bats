@@ -77,7 +77,7 @@ load lib
 
     run_ingest
 
-    [ "$status" -eq 0 ]
+    [ "$status" -eq 1 ]
     grep -Fxq -- "NEW--------" "$ROOT/.processed"
     ! grep -Fxq -- "OLD--------" "$ROOT/.processed"
     # Cursor unchanged: still PREV-------. OLD-------- will be retried next run.
@@ -107,7 +107,7 @@ load lib
 
     run_ingest
 
-    [ "$status" -eq 0 ]
+    [ "$status" -eq 1 ]
     [[ "$output" == *"deferred (Claude spend limit"* ]]
     ! grep -Fxq -- "SPEND1-----" "$ROOT/.processed" 2>/dev/null
     # Marker is cleaned up by ingest.sh after detecting it.
@@ -122,7 +122,7 @@ load lib
 
     run_ingest
 
-    [ "$status" -eq 0 ]
+    [ "$status" -eq 1 ]
     [[ "$output" == *"run watchdog: fan-out exceeded 1s"* ]]
 }
 
@@ -178,9 +178,30 @@ load lib
 
     run_ingest
 
-    [ "$status" -eq 0 ]
+    [ "$status" -eq 1 ]
     ! grep -Fxq -- "BROKEN-----" "$ROOT/.processed" 2>/dev/null
     [ ! -f "$ROOT/.channels/failchan" ]
+}
+
+@test "missing Claude CLI aborts before discovery or per-video writes" {
+    set_playlist "CLAUDEMISS-"
+    export YOUTUBE_INGEST_CLAUDE_BIN="$BATS_TEST_TMPDIR/missing-claude"
+
+    run_ingest
+
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Claude CLI not found"* ]]
+    [ ! -e "$ROOT/CLAUDEMISS-" ]
+}
+
+@test "ingest-one rejects a missing Claude CLI before creating a video directory" {
+    export YOUTUBE_INGEST_CLAUDE_BIN="$BATS_TEST_TMPDIR/missing-claude"
+
+    run_ingest_one "CLAUDEONE--"
+
+    [ "$status" -eq 1 ]
+    grep -Fq "Claude CLI not found" "$ROOT/.ingest.log"
+    [ ! -e "$ROOT/CLAUDEONE--" ]
 }
 
 @test "--help prints usage and touches nothing" {
@@ -243,7 +264,7 @@ load lib
 
     run_ingest
 
-    [ "$status" -eq 0 ]
+    [ "$status" -eq 1 ]
     [[ "$output" == *"channel @deadchan: feed fetch FAILED"* ]]
     grep -Fxq -- "LIVE1------" "$ROOT/.processed"
     [ ! -f "$ROOT/.channels/deadchan" ]
@@ -298,7 +319,7 @@ load lib
 
     run_ingest
 
-    [ "$status" -eq 0 ]
+    [ "$status" -eq 1 ]
     [[ "$output" == *"feed walk TRUNCATED"* ]]
     grep -Fxq -- "TRNEW1-----" "$ROOT/.processed"
     ! grep -Fxq -- "TRNEW2-----" "$ROOT/.processed"

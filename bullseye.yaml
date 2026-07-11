@@ -208,15 +208,19 @@ targets:
     discovered: 2026-07-04
   T7.1:
     name: The launchd scheduler is version-controlled, pins the ytt binary, and keeps logs out of the git-tracked content tree
-    status: identified
+    status: converging
     value: 0.0
     cost: 0.0
     acceptance:
-    - The scheduler plist is committed in the ytt repo (not just a live artifact on one machine)
-    - The scheduled runner pins which ytt binary it invokes (YOUTUBE_INGEST_YTT_BIN / running the installed `ytt ingest`), eliminating the shell(~/.py)-vs-launchd(brew) skew
-    - The scheduled runner writes its logs outside ~/think via YOUTUBE_INGEST_LOG + plist StandardOutPath, and stray content-tree logs are gitignored, so ingest no longer produces auto-sync noise commits
-    - The live plist is updated to the released binary and verified to load
-    context: The crosshair-independent slice of 🎯T7 (see its blocker note). Directly closes two whole-product review findings — binary-identity skew (behind the June --json outage) and content-tree log churn — without retiring the working launchd scheduler.
+    - The scheduler plist is committed in the ytt repo (not just a live artifact on one machine).
+    - The scheduled runner pins and preflights both its ytt and Claude executables before discovery, eliminating shell-vs-launchd binary identity skew and missing-CLI worker failures.
+    - Any incomplete run—failed video worker, incomplete discovery, run watchdog expiry, or index-refresh failure—exits non-zero so scheduler state is not falsely green.
+    - The scheduled runner writes its logs outside ~/think via YOUTUBE_INGEST_LOG + plist StandardOutPath, and stray content-tree logs are gitignored, so ingest no longer produces auto-sync noise commits.
+    - The live plist is updated to the released binary and verified to load.
+    context: |-
+      The crosshair-independent slice of 🎯T7 (see its blocker note). Directly closes two whole-product review findings — binary-identity skew (behind the June --json outage) and content-tree log churn — without retiring the working launchd scheduler.
+
+      Reverted 2026-07-10: Regression verified 2026-07-10: the version-controlled live plist omits /Users/marcelo/.local/bin from PATH, so every scheduled synopsis call fails to resolve Claude. The runner also exits 0 after worker failures, hiding the outage from launchd. Restore an explicit Claude binary contract and fail the run when queued items do not land.
     origin: manual
     discovered: 2026-07-04
   T8:
