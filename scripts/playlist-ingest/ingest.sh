@@ -1,14 +1,30 @@
 #!/usr/bin/env bash
 # Ingest new videos from a YouTube playlist and from tracked channels.
 #
-# Usage: ingest.sh [PLAYLIST_URL]
+# Usage: ingest.sh [--dry-run] [PLAYLIST_URL]
 #   PLAYLIST_URL defaults to $YOUTUBE_INGEST_PLAYLIST and must be an
 #   http(s) URL. -h/--help prints this header.
+#   --dry-run runs discovery (including config resolution and the health
+#   checks) and prints the queue it WOULD ingest, then exits without
+#   fetching transcripts, calling Claude, or touching .processed. This is
+#   the cheap way to answer "is the scheduler actually seeing my channels?"
+#   without paying for a backlog.
 #
 # Sources:
 #   1. The playlist named by PLAYLIST_URL / $YOUTUBE_INGEST_PLAYLIST.
-#   2. The channels listed in $YOUTUBE_CHANNELS_FILE
-#      (default: ../channel-ingest/channels.yaml).
+#   2. The channels listed in the resolved channels file — $YOUTUBE_CHANNELS_FILE
+#      if set, else $XDG_CONFIG_HOME/ytt/channels.yaml (i.e. normally
+#      ~/.config/ytt/channels.yaml), else the copy beside this script.
+#
+# Config location: the channels file must NOT be resolved from the install
+# directory alone. This script is installed into a versioned, package-managed
+# prefix (Homebrew: .../Cellar/ytt/<version>/libexec/...) which is replaced
+# wholesale on upgrade and never contains the user's gitignored channels.yaml.
+# Resolving config from $HERE silently disabled channel ingest for 15 days
+# (2026-07-10 → 07-26) the moment the scheduler was pinned to the installed
+# binary: the run found no channels file, logged it as "not enabled", and
+# exited 0 every night. Hence the user-config-first search order above, and
+# the orphaned-config check further down.
 #
 # All sources share $ROOT/.processed for dedup. For channels, a per-channel
 # cursor file at $ROOT/.channels/<handle> records the most recent video ID
@@ -30,6 +46,16 @@
 #              with no Wi-Fi, where every DNS lookup fails.
 #              $YOUTUBE_INGEST_NETWORK_WAIT caps the wait (default 14400s);
 #              $YOUTUBE_INGEST_NETWORK_POLL sets the poll interval (default 60s).
+# Alerts:      an unhealthy run hands a one-line verdict plus the offending log
+#              lines to ./notify.sh, which fans out to Slack and/or a macOS
+#              banner. Nobody reads a log file daily, so a scheduled job that
+#              can only complain into its own log is a job that fails silently.
+#              See notify.sh for sink configuration.
+# Staleness:   a run is also unhealthy if channels are tracked but NOTHING has
+#              been ingested for $YOUTUBE_INGEST_STALE_DAYS days (default 7,
+#              0 disables). This is the backstop for the whole "every step
+#              reported success and yet no knowledge arrived" failure class —
+#              the one that survived every other check in this pipeline.
 
 set -euo pipefail
 
@@ -40,6 +66,12 @@ case "${1:-}" in
         exit 0
         ;;
 esac
+
+DRY_RUN=false
+if [[ "${1:-}" == --dry-run ]]; then
+    DRY_RUN=true
+    shift
+fi
 
 PLAYLIST="${1:-${YOUTUBE_INGEST_PLAYLIST:-}}"
 if [[ -z "$PLAYLIST" ]]; then
@@ -74,15 +106,71 @@ RUN_TIMEOUT="${YOUTUBE_INGEST_RUN_TIMEOUT:-21600}"   # 6 hours
 # Bounds the worst case when a cursor is stale or missing.
 CHANNEL_WALK_LIMIT=50
 HERE="$(cd "$(dirname "$0")" && pwd)"
-CHANNELS_FILE="${YOUTUBE_CHANNELS_FILE:-$HERE/channels.yaml}"
+
+# Resolve the channels file from user config first and the install dir last —
+# see the "Config location" note in the header for why the reverse order cost
+# 15 days of silent no-ops. An explicit $YOUTUBE_CHANNELS_FILE always wins
+# (the scheduler pins it; the tests rely on it).
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/ytt"
+if [[ -n "${YOUTUBE_CHANNELS_FILE:-}" ]]; then
+    CHANNELS_FILE="$YOUTUBE_CHANNELS_FILE"
+elif [[ -f "$CONFIG_DIR/channels.yaml" ]]; then
+    CHANNELS_FILE="$CONFIG_DIR/channels.yaml"
+else
+    CHANNELS_FILE="$HERE/channels.yaml"
+fi
+
+# Alert/notification state lives outside $ROOT: $ROOT is a git-tracked content
+# tree, and health bookkeeping is machine state, not knowledge.
+STATE_DIR="${YOUTUBE_INGEST_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/ytt}"
+STALE_DAYS="${YOUTUBE_INGEST_STALE_DAYS:-7}"
+NOTIFY_BIN="${YOUTUBE_INGEST_NOTIFY_BIN:-$HERE/notify.sh}"
 
 export YOUTUBE_INGEST_ROOT="$ROOT"
 
-mkdir -p "$ROOT" "$CHANNELS_DIR"
+mkdir -p "$ROOT" "$CHANNELS_DIR" "$STATE_DIR"
 touch "$STATE" "$LOG"
 
 log() {
     printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$LOG" >&2
+}
+
+# Everything wrong with this run, one human-readable line per problem. This
+# list is BOTH the exit-code decision and the notification body, so there is
+# no way to add a failure mode that fails the run without also alerting.
+ISSUES=()
+note_issue() {
+    ISSUES+=("$*")
+    log "UNHEALTHY: $*"
+}
+
+# Hand a verdict to the notifier. Alerting is a side channel: a broken webhook
+# must never change the run's outcome, so notifier failures are logged and
+# swallowed rather than propagated.
+notify() {
+    local status="$1" subject="$2"; shift 2
+    if $DRY_RUN; then
+        # A diagnostic run must not page anyone, and must not touch the
+        # notifier's dedup state — otherwise debugging suppresses the real
+        # alert that the next scheduled run needs to send.
+        log "dry run: would notify [$status] $subject"
+        return 0
+    fi
+    if [[ ! -x "$NOTIFY_BIN" ]]; then
+        log "no executable notifier at $NOTIFY_BIN; alert not sent"
+        return 0
+    fi
+    if ! printf '%s\n' "$@" \
+            | YOUTUBE_INGEST_STATE_DIR="$STATE_DIR" "$NOTIFY_BIN" "$status" "$subject" >>"$LOG" 2>&1; then
+        log "notifier failed (see $LOG); continuing"
+    fi
+}
+
+# Preflight aborts exit before the run proper, so they alert on their way out.
+die() {
+    note_issue "$1"
+    notify problem "ytt ingest aborted before discovery" "${ISSUES[@]}"
+    exit 1
 }
 
 # Resolve the two executables which identify the ingest pipeline before doing
@@ -91,13 +179,11 @@ log() {
 # dependency into a misleading, apparently-successful empty run.
 YTT_BIN="${YOUTUBE_INGEST_YTT_BIN:-ytt}"
 if ! YTT_BIN="$(command -v "$YTT_BIN")"; then
-    log "ytt executable not found: ${YOUTUBE_INGEST_YTT_BIN:-ytt}; aborting"
-    exit 1
+    die "ytt executable not found: ${YOUTUBE_INGEST_YTT_BIN:-ytt}; aborting"
 fi
 CLAUDE_BIN="${YOUTUBE_INGEST_CLAUDE_BIN:-claude}"
 if ! CLAUDE_BIN="$(command -v "$CLAUDE_BIN")"; then
-    log "Claude CLI not found: ${YOUTUBE_INGEST_CLAUDE_BIN:-claude}; aborting"
-    exit 1
+    die "Claude CLI not found: ${YOUTUBE_INGEST_CLAUDE_BIN:-claude}; aborting"
 fi
 export YOUTUBE_INGEST_YTT_BIN="$YTT_BIN"
 export YOUTUBE_INGEST_CLAUDE_BIN="$CLAUDE_BIN"
@@ -133,8 +219,7 @@ NETWORK_POLL="${YOUTUBE_INGEST_NETWORK_POLL:-60}"
 # Without this preflight, a missing curl exits 127 inside network_up and the
 # gate loops for the full NETWORK_WAIT looking exactly like a network outage.
 if ! command -v curl >/dev/null; then
-    log "curl not found on PATH — cannot probe network reachability; aborting"
-    exit 1
+    die "curl not found on PATH — cannot probe network reachability; aborting"
 fi
 network_up() {
     curl -fsI --max-time 10 -o /dev/null https://www.youtube.com/robots.txt
@@ -142,8 +227,7 @@ network_up() {
 WAITED=0
 until network_up; do
     if (( WAITED >= NETWORK_WAIT )); then
-        log "network still unreachable after ${WAITED}s of waiting; giving up (next scheduled run retries)"
-        exit 1
+        die "network still unreachable after ${WAITED}s of waiting; giving up (next scheduled run retries)"
     fi
     if (( WAITED == 0 )); then
         log "network unreachable; waiting up to ${NETWORK_WAIT}s for connectivity"
@@ -187,7 +271,7 @@ if with_timeout 120 yt-dlp --flat-playlist --print id --playlist-reverse "$PLAYL
 else
     rc=$?
     DISCOVERY_FAILURES=$((DISCOVERY_FAILURES + 1))
-    log "playlist enumeration FAILED (rc=$rc); playlist skipped this run"
+    note_issue "playlist enumeration FAILED (rc=$rc); playlist skipped this run"
 fi
 rm -f "$PLAYLIST_LIST"
 
@@ -226,7 +310,7 @@ if [[ -f "$CHANNELS_FILE" ]]; then
             latest=$(with_timeout 120 yt-dlp --flat-playlist --playlist-end 1 --print id "$url" 2>/dev/null) || rc=$?
             if (( rc != 0 )); then
                 DISCOVERY_FAILURES=$((DISCOVERY_FAILURES + 1))
-                log "channel @$handle: feed fetch FAILED (rc=$rc); skipping this run"
+                note_issue "channel @$handle: feed fetch FAILED (rc=$rc); skipping this run"
                 continue
             fi
             if [[ -z "$latest" ]]; then
@@ -289,7 +373,7 @@ if [[ -f "$CHANNELS_FILE" ]]; then
                 # cursor and rediscovers anything missed (dedup by .processed).
                 : > "$discovered.partial"
                 DISCOVERY_FAILURES=$((DISCOVERY_FAILURES + 1))
-                log "channel @$handle: pending=${#pending_for_channel[@]} but feed walk TRUNCATED mid-stream (rc=$feed_rc) — cursor pinned; full re-walk next run"
+                note_issue "channel @$handle: pending=${#pending_for_channel[@]} but feed walk TRUNCATED mid-stream (rc=$feed_rc) — cursor pinned; full re-walk next run"
             else
                 rm -f "$discovered.partial"
                 log "channel @$handle: pending=${#pending_for_channel[@]} (cursor advance deferred to post-fan-out)"
@@ -298,13 +382,32 @@ if [[ -f "$CHANNELS_FILE" ]]; then
             # Nothing (usable) read and the fetch failed ⇒ "nothing new"
             # would be a lie.
             DISCOVERY_FAILURES=$((DISCOVERY_FAILURES + 1))
-            log "channel @$handle: feed fetch FAILED (rc=$feed_rc); skipping this run"
+            note_issue "channel @$handle: feed fetch FAILED (rc=$feed_rc); skipping this run"
         else
             log "channel @$handle: nothing new"
         fi
     done
 else
-    log "no channels file at $CHANNELS_FILE; skipping channel ingest (copy channels.example.yaml to enable)"
+    # Distinguish "channel ingest was never enabled" (fine, stay quiet) from
+    # "the config that was driving channel ingest is no longer where we look"
+    # (a silent outage). The cursor files are the evidence: one exists per
+    # channel we have actually ingested from, so their presence proves channels
+    # WERE configured and working. Without this distinction a packaging or
+    # path change orphans the config and every run still reports a cheerful,
+    # successful no-op — which is precisely what happened for 15 days.
+    shopt -s nullglob
+    ORPHANED=()
+    for f in "$CHANNELS_DIR"/*; do
+        [[ "$f" == *.discovered || "$f" == *.partial ]] && continue
+        ORPHANED+=("$(basename "$f")")
+    done
+    shopt -u nullglob
+    if (( ${#ORPHANED[@]} > 0 )); then
+        DISCOVERY_FAILURES=$((DISCOVERY_FAILURES + 1))
+        note_issue "channels config MISSING at $CHANNELS_FILE, yet ${#ORPHANED[@]} channel(s) have ingest cursors (${ORPHANED[*]}) — the config was orphaned, not disabled. No channel ingest happened this run; set \$YOUTUBE_CHANNELS_FILE or restore ${CONFIG_DIR}/channels.yaml."
+    else
+        log "no channels file at $CHANNELS_FILE; skipping channel ingest (copy channels.example.yaml to enable)"
+    fi
 fi
 
 # Build the fan-out order. Recovery orphans go first, so a recovered ID isn't
@@ -363,13 +466,59 @@ for ID in "${NEW[@]}"; do
 done
 NEW=("${SANE[@]}")
 
-if (( ${#NEW[@]} == 0 )); then
-    if (( DISCOVERY_FAILURES > 0 )); then
-        log "nothing to do — but $DISCOVERY_FAILURES discovery source(s) FAILED; results incomplete"
+# Staleness backstop. Every other check in this script asks "did this step
+# fail?"; none asks "is this pipeline still producing anything?". A config that
+# quietly stops feeding the queue, a cursor set that never advances, an upstream
+# that changes its feed shape — each reports success forever while the knowledge
+# base silently freezes. Only a liveness check catches that class, so this is
+# the one check that fires on the strength of a NON-event.
+STAMP="$STATE_DIR/last-ingest"
+[[ -f "$STAMP" ]] || date -u +%s > "$STAMP"   # seed: a fresh install must not alarm
+check_staleness() {
+    (( STALE_DAYS > 0 )) || return 0
+    # Only meaningful when channels are tracked: a playlist-only setup
+    # legitimately goes quiet forever once its playlist is drained.
+    [[ -f "$CHANNELS_FILE" ]] || return 0
+    local last age
+    last="$(cat "$STAMP" 2>/dev/null || printf '0')"
+    [[ "$last" =~ ^[0-9]+$ ]] || return 0
+    age=$(( ( $(date -u +%s) - last ) / 86400 ))
+    if (( age >= STALE_DAYS )); then
+        note_issue "nothing ingested for ${age} days (threshold ${STALE_DAYS}) despite tracked channels — the pipeline is reporting success while producing nothing"
+    fi
+}
+
+# The single exit path for every outcome past discovery: decide the verdict,
+# alert on it, and set the exit code launchd records. Routing all outcomes
+# through here is what guarantees an unhealthy run cannot exit quietly.
+finish() {
+    local summary="$1"
+    if (( ${#ISSUES[@]} > 0 )); then
+        notify problem "ytt ingest unhealthy (${#ISSUES[@]} issue(s)): $summary" "${ISSUES[@]}"
         exit 1
     fi
-    log "nothing to do"
+    notify ok "ytt ingest healthy: $summary" "$summary"
     exit 0
+}
+
+if $DRY_RUN; then
+    log "dry run: channels file = $CHANNELS_FILE"
+    log "dry run: ${#NEW[@]} video(s) would be ingested"
+    check_staleness
+    if (( ${#NEW[@]} > 0 )); then printf '%s\n' "${NEW[@]}"; fi
+    # Discovery may have left .discovered files and adopted bootstrap cursors.
+    # Both are idempotent — the next real run rediscovers and consumes them.
+    finish "dry run, ${#NEW[@]} pending"
+fi
+
+if (( ${#NEW[@]} == 0 )); then
+    check_staleness
+    if (( DISCOVERY_FAILURES > 0 )); then
+        log "nothing to do — but $DISCOVERY_FAILURES discovery source(s) FAILED; results incomplete"
+    else
+        log "nothing to do"
+    fi
+    finish "nothing to do"
 fi
 
 log "ingesting ${#NEW[@]} videos"
@@ -442,29 +591,46 @@ shopt -u nullglob
 
 if $SPEND_LIMITED; then
     log "done: $INGESTED ingested, $FAILED deferred (Claude spend limit hit — run cut short; remainder retries next run)"
+    note_issue "Claude spend limit hit — run cut short with $FAILED video(s) deferred to the next run"
 else
     log "done: $INGESTED ingested, $FAILED failed"
+    if (( FAILED > 0 )); then
+        note_issue "$FAILED of ${#NEW[@]} queued video(s) failed to ingest and stay pending for the next run"
+    fi
+fi
+if (( run_rc == 124 )) && ! $SPEND_LIMITED; then
+    note_issue "run watchdog fired: the fan-out exceeded ${RUN_TIMEOUT}s and was terminated"
 fi
 if (( DISCOVERY_FAILURES > 0 )); then
     log "warning: $DISCOVERY_FAILURES discovery source(s) FAILED this run; anything they held surfaces next run"
 fi
 
+# Liveness stamp: only a landed video counts. Advancing this on a merely
+# error-free run would defeat the staleness check entirely.
+if (( INGESTED > 0 )); then
+    date -u +%s > "$STAMP"
+else
+    check_staleness
+fi
+
 # Refresh the knowledge-base index whenever new synopses landed. Without
 # this the per-video files exist but the user-facing summary page stays
 # frozen — exactly the symptom that prompted this design pass.
-INDEX_OK=true
 if (( INGESTED > 0 )); then
     if "$HERE/build-index.sh" >>"$LOG" 2>&1; then
         log "index refreshed"
     else
         log "index refresh failed (see $LOG)"
-        INDEX_OK=false
+        note_issue "knowledge-base index refresh FAILED — $INGESTED new synopsis file(s) exist but the index page is stale"
     fi
 fi
 
 # launchd has no knowledge of the per-worker log. A partial batch is not a
 # healthy run: return failure so its last-exit-code, and any future scheduler,
-# reflect the pending retry rather than falsely reporting success.
-if (( FAILED > 0 || DISCOVERY_FAILURES > 0 || run_rc != 0 )) || ! $INDEX_OK; then
-    exit 1
+# reflect the pending retry rather than falsely reporting success. The
+# run_rc term below is belt-and-braces: every other failure condition has
+# already called note_issue, so finish() fails the run on $ISSUES alone.
+if (( run_rc != 0 )) && (( ${#ISSUES[@]} == 0 )); then
+    note_issue "fan-out exited non-zero (rc=$run_rc) with no per-video failure recorded"
 fi
+finish "$INGESTED ingested, $FAILED failed"

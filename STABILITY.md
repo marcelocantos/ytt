@@ -62,7 +62,12 @@ settle (see **Playlist-ingest workflow** below).
 |---|---|---|
 | `YOUTUBE_INGEST_PLAYLIST` | (required if not passed positionally) | Needs review |
 | `YOUTUBE_INGEST_ROOT` | `~/think/knowledge/youtube` | Needs review |
-| `YOUTUBE_CHANNELS_FILE` | `<scripts-dir>/channels.yaml` | Fluid |
+| `YOUTUBE_CHANNELS_FILE` | `$XDG_CONFIG_HOME/ytt/channels.yaml` | Needs review |
+| `YOUTUBE_INGEST_STALE_DAYS` | `7` | Needs review |
+| `YOUTUBE_INGEST_STATE_DIR` | `$XDG_STATE_HOME/ytt` | Needs review |
+| `YOUTUBE_INGEST_SLACK_WEBHOOK_FILE` | `$XDG_CONFIG_HOME/ytt/slack-webhook` | Needs review |
+| `YOUTUBE_INGEST_NOTIFY_BANNER` | `1` | Needs review |
+| `YOUTUBE_INGEST_NOTIFY_RENOTIFY_DAYS` | `7` | Needs review |
 | `YOUTUBE_INGEST_CONCURRENCY` | `4` | Stable |
 | `YOUTUBE_INGEST_YTT_BIN` | `ytt` (PATH) | Stable |
 | `YOUTUBE_INGEST_CLAUDE_BIN` | `claude` (PATH) | Stable |
@@ -81,6 +86,8 @@ personal-vault-shaped and likely to move to something neutral
 | `$ROOT/.processed` (one ID per line) | Stable |
 | `$ROOT/.channels/<handle>` (cursor file) | Stable |
 | `$ROOT/.ingest.log` | Stable |
+| `$XDG_STATE_HOME/ytt/last-ingest` (liveness stamp, unix seconds) | Needs review |
+| `$XDG_STATE_HOME/ytt/notify-state` (alert dedup, `key=value` lines) | Needs review |
 | `$ROOT/youtube-knowledge-base.md` (index) | Fluid |
 
 The synopsis file's filename convention (topic slug) and TL;DR-line

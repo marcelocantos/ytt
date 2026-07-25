@@ -7,7 +7,35 @@
 #   MOCK_CURL_FAIL_COUNT  — fail the first N calls, then succeed (call count
 #                           persisted in $YOUTUBE_INGEST_ROOT/.curl-calls)
 
+#
+# Webhook mode: a call carrying -X POST is treated as a notify.sh Slack post
+# rather than a reachability probe. The URL and JSON payload are appended to
+# $MOCK_CURL_POST_LOG so tests can assert on what would have reached Slack;
+# MOCK_CURL_POST_FAIL makes the POST fail (exit 22, curl's --fail HTTP error).
+
 set -e
+
+# Detect and record a webhook POST before the generic failure switches below:
+# a probe failure and a webhook failure are injected independently.
+is_post=false
+payload=""
+url=""
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+    case "${args[$i]}" in
+        -X) [[ "${args[$((i + 1))]:-}" == POST ]] && is_post=true ;;
+        --data) payload="${args[$((i + 1))]:-}" ;;
+        https://*|http://*) url="${args[$i]}" ;;
+    esac
+done
+
+if $is_post; then
+    if [[ -n "${MOCK_CURL_POST_LOG:-}" ]]; then
+        printf 'POST %s %s\n' "$url" "$payload" >> "$MOCK_CURL_POST_LOG"
+    fi
+    [[ -n "${MOCK_CURL_POST_FAIL:-}" ]] && exit 22
+    exit 0
+fi
 
 if [[ -n "${MOCK_CURL_FAIL:-}" ]]; then
     exit 6

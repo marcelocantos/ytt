@@ -335,3 +335,203 @@ load lib
     grep -Fxq -- "TRNEW2-----" "$ROOT/.processed"
     [ "$(cat "$ROOT/.channels/truncchan")" = "TRNEW2-----" ]
 }
+
+# --- the 2026-07-10 regression: config orphaned by pinning the install ------
+
+@test "orphaned channels config (cursors exist, config gone) is loud, not a cheerful no-op" {
+    # Reproduces the 15-day outage: the scheduler was pinned to the Homebrew
+    # binary, so config resolution pointed into the Cellar where the gitignored
+    # channels.yaml has never existed. Cursors prove channels WERE working.
+    no_channels_config
+    set_cursor natebjones "PREV-------"
+    mark_processed "PREV-------"
+    set_playlist ""
+
+    run_ingest
+
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"channels config MISSING"* ]]
+    [[ "$output" == *"the config was orphaned, not disabled"* ]]
+    [[ "$output" == *"natebjones"* ]]
+    [[ "$(notifications)" == *"problem ytt ingest unhealthy"* ]]
+    [[ "$(notifications)" == *"channels config MISSING"* ]]
+}
+
+@test "no channels config and no cursors is a legitimate playlist-only setup (silent, exit 0)" {
+    # The same missing file must NOT alert when channel ingest was simply never
+    # enabled — otherwise every playlist-only user is permanently 'unhealthy'.
+    no_channels_config
+    set_playlist ""
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"skipping channel ingest"* ]]
+    [[ "$output" != *"config was orphaned"* ]]
+    [[ "$(notifications)" != *problem* ]]
+}
+
+@test "channels config resolves from XDG config dir, not the install directory" {
+    use_xdg_channels_config "@xdgchan"
+    set_channel xdgchan XDGVID1----
+    set_playlist ""
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"channel @xdgchan"* ]]
+    grep -Fxq -- "XDGVID1----" "$ROOT/.processed"
+}
+
+@test "explicit YOUTUBE_CHANNELS_FILE still wins over the XDG config dir" {
+    use_xdg_channels_config "@xdgchan"
+    export YOUTUBE_CHANNELS_FILE="$BATS_TEST_TMPDIR/explicit.yaml"
+    printf 'channels:\n  - handle: "@explicitchan"\n' > "$YOUTUBE_CHANNELS_FILE"
+    set_channel explicitchan EXPVID1----
+    set_channel xdgchan XDGVID1----
+    set_playlist ""
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    grep -Fxq -- "EXPVID1----" "$ROOT/.processed"
+    ! grep -Fxq -- "XDGVID1----" "$ROOT/.processed"
+}
+
+# --- staleness backstop: success that produces nothing, forever -------------
+
+@test "staleness: tracked channels producing nothing for too long is unhealthy" {
+    channels_with "@quietchan"
+    set_channel quietchan "OLD--------"
+    mark_processed "OLD--------"
+    set_cursor quietchan "OLD--------"
+    set_playlist ""
+    set_last_ingest_days_ago 15
+
+    run_ingest
+
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"nothing ingested for 15 days"* ]]
+    [[ "$output" == *"reporting success while producing nothing"* ]]
+    [[ "$(notifications)" == *"problem ytt ingest unhealthy"* ]]
+}
+
+@test "staleness: quiet playlist-only setup never trips the check" {
+    # No channels file ⇒ going quiet is the expected steady state.
+    no_channels_config
+    set_playlist ""
+    set_last_ingest_days_ago 90
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"nothing ingested for"* ]]
+    [[ "$(notifications)" != *problem* ]]
+}
+
+@test "staleness: threshold is configurable and 0 disables it" {
+    channels_with "@quietchan"
+    set_channel quietchan "OLD--------"
+    mark_processed "OLD--------"
+    set_cursor quietchan "OLD--------"
+    set_playlist ""
+    set_last_ingest_days_ago 30
+
+    YOUTUBE_INGEST_STALE_DAYS=0 run_ingest
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"nothing ingested for"* ]]
+}
+
+@test "staleness: a landed video refreshes the liveness stamp" {
+    channels_with "@livechan"
+    set_channel livechan "LIVE1------"
+    set_last_ingest_days_ago 30
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    grep -Fxq -- "LIVE1------" "$ROOT/.processed"
+    # Stamp must now be ~now, so the next run doesn't inherit the stale verdict.
+    stamp="$(cat "$YOUTUBE_INGEST_STATE_DIR/last-ingest")"
+    (( $(date -u +%s) - stamp < 300 ))
+}
+
+# --- alert coverage ---------------------------------------------------------
+
+@test "a healthy run alerts nobody" {
+    set_playlist "HEALTHY1---"
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    [[ "$(notifications)" == *"ok ytt ingest healthy"* ]]
+    [[ "$(notifications)" != *problem* ]]
+}
+
+@test "per-video ingest failures are alerted, not just logged" {
+    set_playlist "FAILVID1---"
+    export MOCK_CLAUDE_FAIL="FAILVID1---"
+
+    run_ingest
+
+    [ "$status" -eq 1 ]
+    [[ "$(notifications)" == *"problem ytt ingest unhealthy"* ]]
+    [[ "$(notifications)" == *"failed to ingest and stay pending"* ]]
+}
+
+@test "a missing Claude CLI alerts before discovery" {
+    export YOUTUBE_INGEST_CLAUDE_BIN="/nonexistent/claude"
+    set_playlist "VID300-----"
+
+    run_ingest
+
+    [ "$status" -eq 1 ]
+    [[ "$(notifications)" == *"problem ytt ingest aborted before discovery"* ]]
+    [[ "$(notifications)" == *"Claude CLI not found"* ]]
+}
+
+@test "network give-up alerts instead of dying into the log" {
+    export MOCK_CURL_FAIL=1
+    export YOUTUBE_INGEST_NETWORK_WAIT=1
+    export YOUTUBE_INGEST_NETWORK_POLL=1
+
+    run_ingest
+
+    [ "$status" -eq 1 ]
+    [[ "$(notifications)" == *"problem ytt ingest aborted before discovery"* ]]
+    [[ "$(notifications)" == *"network still unreachable"* ]]
+}
+
+# --- dry run ---------------------------------------------------------------
+
+@test "--dry-run reports the queue without ingesting or alerting" {
+    channels_with "@drychan"
+    set_channel drychan DRY1------- DRY2-------
+    set_playlist "DRYPL1-----"
+
+    run_ingest --dry-run
+
+    [ "$status" -eq 0 ]
+    # Bootstrap takes only the channel's latest upload, so: 1 playlist + 1 channel.
+    [[ "$output" == *"dry run: 2 video(s) would be ingested"* ]]
+    [[ "$output" == *"DRY1-------"* ]]
+    # Nothing ingested, nothing recorded, nobody paged.
+    [ ! -s "$ROOT/.processed" ]
+    [ ! -d "$ROOT/DRY1-------" ]
+    [ -z "$(notifications)" ]
+}
+
+@test "--dry-run surfaces an orphaned config without touching alert state" {
+    no_channels_config
+    set_cursor natebjones "PREV-------"
+    mark_processed "PREV-------"
+    set_playlist ""
+
+    run_ingest --dry-run
+
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"channels config MISSING"* ]]
+    [[ "$output" == *"dry run: would notify [problem]"* ]]
+    [ -z "$(notifications)" ]
+}
