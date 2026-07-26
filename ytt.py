@@ -14,7 +14,7 @@ from pathlib import Path
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import CouldNotRetrieveTranscript
 
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 
 
 AGENT_HELP = """\
@@ -27,6 +27,7 @@ Usage:
   ytt <v1> <v2> ...                multiple videos, separated by a blank line
                                    (or one JSON object per line with --json)
   ytt ingest [PLAYLIST_URL]        bulk-ingest a playlist + tracked channels
+  ytt ingest --dry-run             report the queue without fetching or spending
 
 Accepted input forms:
   dQw4w9WgXcQ                      raw 11-character video ID
@@ -65,6 +66,14 @@ Agent tips:
   - `ytt ingest` is a thin wrapper around the bundled bash workflow under
     scripts/playlist-ingest/. Configure via env vars (see README §Playlist
     ingest); requires `yt-dlp`, `jq`, and `yq` on PATH.
+  - Channel config lives in `$XDG_CONFIG_HOME/ytt/channels.yaml` (normally
+    ~/.config/ytt/channels.yaml), NOT beside the installed scripts — the
+    Homebrew prefix is replaced on every upgrade, so config stored there
+    silently disappears and channel ingest turns into a no-op.
+  - Unhealthy scheduled runs alert out-of-band (Slack DM, macOS banner); a run
+    that ingests nothing for $YOUTUBE_INGEST_STALE_DAYS while channels are
+    tracked is itself treated as a failure. Use `--dry-run` to inspect the
+    resolved config and pending queue without fetching or spending.
 """
 
 
