@@ -113,6 +113,35 @@ targets:
     origin: manual
     discovered: 2026-07-26
     achieved: 2026-07-26
+  T12:
+    name: The bundled ingest scripts run on a stock macOS /bin/bash (3.2), or declare their bash requirement
+    status: identified
+    value: 0.0
+    cost: 0.0
+    acceptance:
+    - scripts/playlist-ingest/*.sh contain no bash 4+ constructs (mapfile/readarray/declare -A), or the Homebrew formula declares depends_on "bash" so a modern bash is guaranteed on PATH.
+    - A macOS CI job exercises the bats suite under /bin/bash 3.2, so the incompatibility cannot silently return.
+    - '`ytt ingest --dry-run` runs to completion on a Mac whose only bash is /bin/bash 3.2.'
+    context: Found during the v0.10.0 release audit (2026-07-26). ingest.sh uses `mapfile` in 4 places, which is bash 4+; macOS has shipped bash 3.2.57 since Apple froze it at the last GPLv2 release. The bug is invisible on this machine because Homebrew's bash 5.x satisfies `#!/usr/bin/env bash`, and invisible in CI because the bats job runs on Ubuntu while the macOS release job only runs PyInstaller — so no oracle currently covers the combination that would fail. Pre-existing, not introduced by v0.10.0. notify.sh (added in v0.10.0) was checked and is 3.2-clean.
+    origin: manual
+    discovered: 2026-07-26
+  T13:
+    name: Alert delivery does not silently downgrade because of how the run was invoked
+    status: achieved
+    value: 0.0
+    cost: 0.0
+    acceptance:
+    - The Slack DM target resolves from $YOUTUBE_INGEST_SLACK_DM, else from $XDG_CONFIG_HOME/ytt/slack-dm, so a configured DM sink works regardless of the invoking environment.
+    - When a bot token is present but no DM target can be resolved, notify.sh says so explicitly rather than falling through to the banner with only a subtle log difference.
+    - The macOS banner carries the failure detail, not just the subject line, and its click action opens the ingest log when terminal-notifier is available (osascript notifications have no click handler and no surviving process, so their Show button is inert by construction).
+    - 'bats coverage for: DM target read from the config file, the loud warning when a token exists with no target, and banner delivery via both terminal-notifier and the osascript fallback.'
+    context: |-
+      Found immediately after the v0.10.0 release (2026-07-26) by the backlog drain, which is the best possible way to find it: the run ended 47-ingested/4-failed, correctly judged itself unhealthy, and alerted — but emitted only `notify: banner shown`, no DM. Cause: the DM target is env-only, and the manual invocation did not pass YOUTUBE_INGEST_SLACK_DM. The scheduled run is unaffected because the plist sets it, so nightly alerting works.
+
+      This is the same defect class as the bug the release fixes: required configuration living somewhere invocation-dependent, degrading silently instead of complaining. The token sits in ~/.config/ytt/slack-token but its companion target does not, so the pair can only be half-configured. Storing the target beside the token makes the sink self-contained, and a loud warning when a token has no target removes the silent-downgrade path entirely.
+    origin: manual
+    discovered: 2026-07-26
+    achieved: 2026-07-26
   T2:
     name: Homebrew formula declares yt-dlp, jq, and yq as runtime deps so the bundled playlist-ingest scripts work on a clean install
     status: achieved
@@ -227,7 +256,7 @@ targets:
     discovered: 2026-07-04
   T7.1:
     name: The launchd scheduler is version-controlled, pins the ytt binary, and keeps logs out of the git-tracked content tree
-    status: converging
+    status: achieved
     value: 0.0
     cost: 0.0
     acceptance:
@@ -245,6 +274,7 @@ targets:
       Second regression, 2026-07-26: pinning the runner to the INSTALLED binary (the fix for the skew above) silently orphaned the channel config. ingest.sh resolved channels.yaml as $HERE/channels.yaml, and $HERE became /opt/homebrew/Cellar/ytt/0.9.0/libexec/scripts/playlist-ingest/ — a package-managed directory that never contains the gitignored channels.yaml and is replaced on every upgrade. From 2026-07-10 to 07-26, 15 consecutive scheduled runs logged "playlist=21 pending=0 / no channels file / nothing to do" and exited 0 while six tracked channels (51 pending videos on discovery) went entirely unfetched. The lesson generalises beyond this bug: pinning an executable also repins every path derived from that executable's location, so config resolution must be anchored independently. Config now resolves user-config-first, and a missing channels file is a hard failure whenever .channels/&lt;handle&gt; cursors prove channels were previously working. Alerting is 🎯T11.
     origin: manual
     discovered: 2026-07-04
+    achieved: 2026-07-26
   T8:
     name: The synopsis contract (TL;DR line, slug rules, file layout) has a single source of truth
     status: achieved

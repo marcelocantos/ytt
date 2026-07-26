@@ -40,10 +40,13 @@
 #           so a careless `chmod` fails loudly here instead of quietly leaking
 #           a credential that can post to the workspace.
 #
-#   macOS   A notification-centre banner via osascript. Zero configuration, so
-#           it works out of the box, but only reaches you at the machine —
-#           hence Slack for anything that matters. Set
-#           $YOUTUBE_INGEST_NOTIFY_BANNER=0 to suppress.
+#   macOS   A notification-centre banner, via terminal-notifier when present
+#           (its own app bundle makes the click action work — it opens the
+#           ingest log) and osascript otherwise (whose "Show" button is inert,
+#           since the posting process is gone). Zero configuration, so it works
+#           out of the box, but only reaches you at the machine — hence Slack
+#           for anything that matters. Set $YOUTUBE_INGEST_NOTIFY_BANNER=0 to
+#           suppress.
 #
 # Dedup: the same problem recurring every night must not produce a nightly
 # alert, and must not be silently dropped forever either. State lives in
@@ -168,7 +171,17 @@ json_payload() {
 
 TOKEN_FILE="${YOUTUBE_INGEST_SLACK_TOKEN_FILE:-$CONFIG_DIR/slack-token}"
 WEBHOOK_FILE="${YOUTUBE_INGEST_SLACK_WEBHOOK_FILE:-$CONFIG_DIR/slack-webhook}"
+# The DM target must not depend on how the run was invoked. Keeping it beside
+# the token means the sink is self-contained: a manual `ytt ingest` alerts the
+# same way the scheduler does. When it lived only in the environment, an ad-hoc
+# run silently downgraded to a banner, distinguishable from a real DM only by
+# one log line.
+DM_FILE="${YOUTUBE_INGEST_SLACK_DM_FILE:-$CONFIG_DIR/slack-dm}"
 SLACK_DM="${YOUTUBE_INGEST_SLACK_DM:-}"
+if [[ -z "$SLACK_DM" && -f "$DM_FILE" ]]; then
+    # Not a secret — a member ID — so no permission check, unlike the token.
+    SLACK_DM="$(head -1 "$DM_FILE" | tr -d '[:space:]')"
+fi
 
 TOKEN="${YOUTUBE_INGEST_SLACK_TOKEN:-}"
 [[ -n "$TOKEN" ]] || TOKEN="$(read_secret "$TOKEN_FILE" || true)"
@@ -182,6 +195,10 @@ TOKEN="${YOUTUBE_INGEST_SLACK_TOKEN:-}"
 # of six invocations and launchd runs bash, not Claude. Alerting must work
 # exactly when things are broken, so it gets its own credential and a plain
 # HTTPS call with no LLM in the path.
+if [[ -n "$TOKEN" && -z "$SLACK_DM" ]]; then
+    echo "notify: a Slack token is configured but no DM target — set \$YOUTUBE_INGEST_SLACK_DM or write your member ID to $DM_FILE. Not sending a DM." >&2
+fi
+
 if [[ -n "$TOKEN" && -n "$SLACK_DM" ]]; then
     if ! command -v curl >/dev/null; then
         echo "notify: curl unavailable; cannot reach Slack" >&2
@@ -228,14 +245,32 @@ if ! $DELIVERED; then
 fi
 
 # ---- macOS banner -----------------------------------------------------------
-if [[ "${YOUTUBE_INGEST_NOTIFY_BANNER:-1}" != 0 ]] && command -v osascript >/dev/null; then
-    # Only the subject goes in the banner; notification centre truncates
-    # aggressively and the full detail is in the log and the Slack message.
-    if BANNER_TITLE="ytt ingest" BANNER_TEXT="$SUBJECT" osascript \
-            -e 'display notification (system attribute "BANNER_TEXT") with title (system attribute "BANNER_TITLE")' \
-            >/dev/null 2>&1; then
-        echo "notify: banner shown"
-        DELIVERED=true
+# terminal-notifier is preferred over osascript because it posts from its own
+# app bundle, so -execute gives the notification a working click action. An
+# osascript notification is posted on behalf of Script Editor with no handler
+# and no surviving process, so macOS still renders a "Show" button but clicking
+# it does nothing — inert by construction, not a bug we can fix in the caller.
+if [[ "${YOUTUBE_INGEST_NOTIFY_BANNER:-1}" != 0 ]]; then
+    banner_log="${YOUTUBE_INGEST_LOG:-}"
+    if command -v terminal-notifier >/dev/null; then
+        tn=(terminal-notifier -title "ytt ingest" -subtitle "$SUBJECT")
+        # First issue line as the message, so the banner names the actual
+        # problem instead of only the summary.
+        tn+=(-message "$(printf '%s' "$BODY" | head -1)")
+        # Clicking opens the log where the full detail already lives.
+        [[ -n "$banner_log" && -f "$banner_log" ]] && tn+=(-execute "open -t '$banner_log'")
+        if "${tn[@]}" >/dev/null 2>&1; then
+            echo "notify: banner shown (terminal-notifier)"
+            DELIVERED=true
+        fi
+    elif command -v osascript >/dev/null; then
+        if BANNER_TITLE="ytt ingest" BANNER_SUB="$SUBJECT" \
+           BANNER_TEXT="$(printf '%s' "$BODY" | head -1)" osascript \
+                -e 'display notification (system attribute "BANNER_TEXT") with title (system attribute "BANNER_TITLE") subtitle (system attribute "BANNER_SUB")' \
+                >/dev/null 2>&1; then
+            echo "notify: banner shown (osascript; Show button is inert)"
+            DELIVERED=true
+        fi
     fi
 fi
 

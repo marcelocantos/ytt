@@ -27,7 +27,12 @@ setup() {
 
     POST_LOG="$BATS_TEST_TMPDIR/posts"
     export MOCK_CURL_POST_LOG="$POST_LOG"
+
+    TN_LOG="$BATS_TEST_TMPDIR/banners"
+    export MOCK_TN_LOG="$TN_LOG"
 }
+
+banners() { cat "$TN_LOG" 2>/dev/null || true; }
 
 # Body goes in via a redirect, never a pipe: `printf ... | run cmd` puts `run`
 # in a subshell, so the $status/$output it sets are lost to the test.
@@ -253,4 +258,72 @@ assert "— dashed" in text, text
 
     [ "$status" -eq 2 ]
     [[ "$output" == *"must be 'problem' or 'ok'"* ]]
+}
+
+
+# --- invocation must not change whether the alert reaches you ---------------
+
+@test "the DM target is read from the config file when the env var is unset" {
+    # The bug this prevents: an ad-hoc run silently downgrading to a banner
+    # because only the scheduler's plist carried the target.
+    unset YOUTUBE_INGEST_SLACK_DM
+    printf 'U2FROMFILE\n' > "$XDG_CONFIG_HOME/ytt/slack-dm"
+    rm -f "$WEBHOOK_FILE"
+
+    notify problem "unhealthy: something" "detail"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"sent Slack DM to U2FROMFILE"* ]]
+    [[ "$(posts)" == *"U2FROMFILE"* ]]
+}
+
+@test "the env var still wins over the config file" {
+    printf 'U2FROMFILE\n' > "$XDG_CONFIG_HOME/ytt/slack-dm"
+    export YOUTUBE_INGEST_SLACK_DM=U2FROMENV
+
+    notify problem "unhealthy: something" "detail"
+
+    [[ "$(posts)" == *"U2FROMENV"* ]]
+    [[ "$(posts)" != *"U2FROMFILE"* ]]
+}
+
+@test "a token with no DM target complains loudly instead of degrading quietly" {
+    unset YOUTUBE_INGEST_SLACK_DM
+    rm -f "$XDG_CONFIG_HOME/ytt/slack-dm" "$WEBHOOK_FILE"
+
+    notify problem "unhealthy: something" "detail"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"a Slack token is configured but no DM target"* ]]
+    [ "$(post_count)" -eq 0 ]
+}
+
+# --- banner content and click action ----------------------------------------
+
+@test "the banner carries the failure detail and opens the log on click" {
+    export YOUTUBE_INGEST_NOTIFY_BANNER=1
+    export YOUTUBE_INGEST_LOG="$BATS_TEST_TMPDIR/ingest.log"
+    : > "$YOUTUBE_INGEST_LOG"
+    rm -f "$TOKEN_FILE" "$WEBHOOK_FILE"
+
+    notify problem "ytt ingest unhealthy (1 issue)" "4 of 51 queued video(s) failed to ingest"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"banner shown (terminal-notifier)"* ]]
+    # Subject as subtitle, the actual issue as the message — not just the summary.
+    [[ "$(banners)" == *"-subtitle ytt ingest unhealthy (1 issue)"* ]]
+    [[ "$(banners)" == *"4 of 51 queued video(s) failed to ingest"* ]]
+    # Clicking opens the log: the whole point of preferring terminal-notifier.
+    [[ "$(banners)" == *"-execute open -t '$YOUTUBE_INGEST_LOG'"* ]]
+}
+
+@test "the banner omits the click action when there is no log to open" {
+    export YOUTUBE_INGEST_NOTIFY_BANNER=1
+    unset YOUTUBE_INGEST_LOG
+    rm -f "$TOKEN_FILE" "$WEBHOOK_FILE"
+
+    notify problem "unhealthy: something" "detail"
+
+    [ "$status" -eq 0 ]
+    [[ "$(banners)" != *"-execute"* ]]
 }
