@@ -75,5 +75,6 @@ jobs:
           bash -n scripts/playlist-ingest/ingest.sh
           bash -n scripts/playlist-ingest/ingest-one.sh
           bash -n scripts/playlist-ingest/build-index.sh
+          bash -n scripts/playlist-ingest/notify.sh
       - name: Run bats tests
         run: bats scripts/playlist-ingest/tests/

@@ -138,12 +138,19 @@ $YOUTUBE_INGEST_ROOT/
 |---|---|---|
 | `YOUTUBE_INGEST_PLAYLIST` | (required) | Playlist URL. Can be passed as the first arg instead. |
 | `YOUTUBE_INGEST_ROOT` | `~/think/knowledge/youtube` | Where ingested videos land. |
-| `YOUTUBE_CHANNELS_FILE` | bundled `channels.yaml` | YAML list of channels to track newest-first. |
+| `YOUTUBE_CHANNELS_FILE` | `~/.config/ytt/channels.yaml` | YAML list of channels to track newest-first. Resolved from `$XDG_CONFIG_HOME/ytt/` — **not** the install directory, which a `brew upgrade` replaces. |
 | `YOUTUBE_INGEST_CONCURRENCY` | `4` | Parallel video workers. |
 | `YOUTUBE_INGEST_YTT_BIN` | `ytt` (PATH) | Absolute path to the `ytt` used for transcript fetches. Pin it in scheduled runs so launchd and your shell can't resolve two different builds. |
 | `YOUTUBE_INGEST_CLAUDE_BIN` | `claude` (PATH) | Absolute path to Claude Code used for synopses. Pin it in scheduled runs because launchd has a deliberately minimal PATH. |
 | `YOUTUBE_INGEST_LOG` | `$YOUTUBE_INGEST_ROOT/.ingest.log` | Ingest log path. Point it outside the content tree for scheduled runs. |
 | `YOUTUBE_INGEST_NETWORK_WAIT` | `14400` | Seconds to wait (awake-time) for connectivity before giving up — covers launchd ticks that fire in a no-network DarkWake window. |
+| `YOUTUBE_INGEST_STALE_DAYS` | `7` | Days of zero ingests (with channels tracked) before the run is judged unhealthy. `0` disables the check. |
+| `YOUTUBE_INGEST_STATE_DIR` | `~/.local/state/ytt` | Where liveness and alert-dedup state live. Kept out of the content tree. |
+| `YOUTUBE_INGEST_SLACK_TOKEN_FILE` | `~/.config/ytt/slack-token` | File holding a Slack bot token, mode `600`. See [Alerting](#alerting). |
+| `YOUTUBE_INGEST_SLACK_DM` | (unset) | Slack user ID to DM (e.g. `U01234567`). Required for the DM sink. |
+| `YOUTUBE_INGEST_SLACK_WEBHOOK_FILE` | `~/.config/ytt/slack-webhook` | Fallback: file holding an incoming-webhook URL, mode `600`. Webhooks post to one channel and cannot DM. |
+| `YOUTUBE_INGEST_NOTIFY_BANNER` | `1` | Set `0` to suppress the macOS notification banner. |
+| `YOUTUBE_INGEST_NOTIFY_RENOTIFY_DAYS` | `7` | Days before an unchanged, unresolved problem alerts again. `0` never re-alerts. |
 
 ### Scheduling
 
@@ -165,20 +172,86 @@ between networks waits for connectivity rather than recording a false
 
 ### Tracking channels (optional)
 
-Copy the bundled example to enable channel ingest:
+Channel config lives in `~/.config/ytt/channels.yaml`:
 
 ```sh
-cp "$(dirname "$(realpath "$(command -v ytt)")")/scripts/playlist-ingest/channels.example.yaml" \
-   ~/my-channels.yaml
-$EDITOR ~/my-channels.yaml
-export YOUTUBE_CHANNELS_FILE=~/my-channels.yaml
-ytt ingest
+mkdir -p ~/.config/ytt
+cp "$(brew --prefix ytt)/libexec/scripts/playlist-ingest/channels.example.yaml" \
+   ~/.config/ytt/channels.yaml
+$EDITOR ~/.config/ytt/channels.yaml
+ytt ingest --dry-run     # confirm the channels are seen before ingesting
 ```
+
+Resolution order is `$YOUTUBE_CHANNELS_FILE`, then
+`$XDG_CONFIG_HOME/ytt/channels.yaml` (default `~/.config/ytt/`), then a
+copy beside the scripts (dev checkouts only). Keep your config out of the
+install directory: Homebrew replaces `.../Cellar/ytt/<version>/libexec/`
+wholesale on every upgrade, so config stored there disappears silently.
 
 On first sight of a channel, the latest video is ingested and recorded
 as a cursor — no backfill of older uploads. Subsequent runs walk newer
-videos until the cursor is hit. If `channels.yaml` is missing, ingest
-falls back to playlist-only mode.
+videos until the cursor is hit. With no channels file at all, ingest
+runs in playlist-only mode.
+
+If a channels file goes missing while `.channels/<handle>` cursors still
+exist, that is treated as an **orphaned config** — a real failure, not a
+preference — and the run fails loudly instead of reporting "nothing to
+do". This case cost 15 days of silent no-ops before v0.10.0.
+
+### Alerting
+
+A scheduled job that only complains into its own log fails silently,
+because nobody reads a log daily. Unhealthy runs therefore alert
+out-of-band via `notify.sh`:
+
+Preferred sink is a **direct message** via a bot token:
+
+1. https://api.slack.com/apps → **Create New App** → From scratch
+2. **OAuth & Permissions** → Bot Token Scopes → add `chat:write` and `im:write`
+3. **Install to Workspace**, copy the `xoxb-…` Bot User OAuth Token
+4. Find your member ID: Slack profile → ⋮ → *Copy member ID*
+
+```sh
+mkdir -p ~/.config/ytt
+printf '%s\n' 'xoxb-…' > ~/.config/ytt/slack-token
+chmod 600 ~/.config/ytt/slack-token
+export YOUTUBE_INGEST_SLACK_DM=U01234567     # your member ID
+```
+
+An incoming webhook is supported as a fallback
+(`~/.config/ytt/slack-webhook`) but is bound to a single channel at
+creation time and **cannot DM**.
+
+Both files are secrets; `notify.sh` refuses to read either unless it is
+mode `600`/`400`. With neither configured it falls back to a macOS
+notification banner.
+
+> **Why not the claude.ai Slack connector?** It is a Claude *session*
+> capability, and the scheduler runs bash, not Claude. Measured on
+> 2026-07-26, a fresh headless `claude -p` had the Slack tools in 1 of 6
+> runs. Alerting has to work exactly when things are broken, so it gets
+> its own credential and a plain HTTPS call with no LLM in the path.
+
+A run is unhealthy when any of these hold:
+
+- a preflight abort (missing `ytt`/`claude`/`curl`, or network never returned)
+- a discovery source failed (playlist or channel feed)
+- a channels config was orphaned (see above)
+- any queued video failed to ingest, or the run watchdog fired
+- the Claude spend limit cut the run short
+- the knowledge-base index failed to refresh
+- **nothing has been ingested for `YOUTUBE_INGEST_STALE_DAYS` days** while
+  channels are tracked — the liveness backstop for "every step succeeded
+  and yet no knowledge arrived"
+
+Repeat alerts are deduplicated: an unchanged problem re-alerts only after
+`YOUTUBE_INGEST_NOTIFY_RENOTIFY_DAYS` (default 7), and a single
+`RECOVERED` notice is sent when the problem clears. Healthy runs are
+otherwise silent.
+
+Use `ytt ingest --dry-run` to run discovery and the health checks and
+print the queue without fetching transcripts, calling Claude, or sending
+alerts.
 
 ### Runtime dependencies
 
