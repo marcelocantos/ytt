@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Mock terminal-notifier — records the flags it was invoked with so tests can
+# assert on banner content and the click action.
+set -euo pipefail
+[[ -n "${MOCK_TN_LOG:-}" ]] && printf '%s\n' "$*" >> "$MOCK_TN_LOG"
+[[ -n "${MOCK_TN_FAIL:-}" ]] && exit 1
+exit 0

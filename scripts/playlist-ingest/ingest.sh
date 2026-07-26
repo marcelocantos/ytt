@@ -160,8 +160,11 @@ notify() {
         log "no executable notifier at $NOTIFY_BIN; alert not sent"
         return 0
     fi
+    # $LOG goes across too: the banner's click action opens it, so the notifier
+    # must know where this run actually logged rather than guessing the default.
     if ! printf '%s\n' "$@" \
-            | YOUTUBE_INGEST_STATE_DIR="$STATE_DIR" "$NOTIFY_BIN" "$status" "$subject" >>"$LOG" 2>&1; then
+            | YOUTUBE_INGEST_STATE_DIR="$STATE_DIR" YOUTUBE_INGEST_LOG="$LOG" \
+              "$NOTIFY_BIN" "$status" "$subject" >>"$LOG" 2>&1; then
         log "notifier failed (see $LOG); continuing"
     fi
 }
