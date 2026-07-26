@@ -191,6 +191,19 @@ fi
 export YOUTUBE_INGEST_YTT_BIN="$YTT_BIN"
 export YOUTUBE_INGEST_CLAUDE_BIN="$CLAUDE_BIN"
 
+# --- bash 3.2 compatibility ------------------------------------------------
+# macOS ships bash 3.2.57 (Apple froze it at the last GPLv2 release) and this
+# script is distributed to macOS users, so it must not use bash 4+ features.
+# Two traps, both of which used to break `ytt ingest` outright on a stock Mac:
+#
+#   1. `mapfile`/`readarray` do not exist. Reading a stream into an array is
+#      spelled as a `while IFS= read -r` loop below. The `|| [[ -n "$_line" ]]`
+#      tail matters: it keeps a final line that lacks a trailing newline, which
+#      is what mapfile did.
+#   2. Under `set -u`, bash before 4.4 treats "${arr[@]}" on an EMPTY array as
+#      an unbound variable and aborts. Every expansion of an array that can
+#      legitimately be empty is therefore written ${arr[@]+"${arr[@]}"}.
+#
 # Hard-timeout wrapper for the yt-dlp discovery calls below — a stalled
 # connection (e.g. after the laptop sleeps mid-run) must not wedge the run.
 # macOS lacks GNU timeout; Homebrew coreutils ships it as `timeout`/`gtimeout`.
@@ -270,7 +283,9 @@ fi
 PLAYLIST_IDS=()
 PLAYLIST_LIST="$(mktemp)"
 if with_timeout 120 yt-dlp --flat-playlist --print id --playlist-reverse "$PLAYLIST" >"$PLAYLIST_LIST"; then
-    mapfile -t PLAYLIST_IDS <"$PLAYLIST_LIST"
+    while IFS= read -r _line || [[ -n "$_line" ]]; do
+        PLAYLIST_IDS+=("$_line")
+    done <"$PLAYLIST_LIST"
 else
     rc=$?
     DISCOVERY_FAILURES=$((DISCOVERY_FAILURES + 1))
@@ -279,7 +294,7 @@ fi
 rm -f "$PLAYLIST_LIST"
 
 PLAYLIST_NEW=()
-for ID in "${PLAYLIST_IDS[@]}"; do
+for ID in ${PLAYLIST_IDS[@]+"${PLAYLIST_IDS[@]}"}; do
     grep -Fxq -- "$ID" "$STATE" || PLAYLIST_NEW+=("$ID")
 done
 log "playlist=${#PLAYLIST_IDS[@]} pending=${#PLAYLIST_NEW[@]}"
@@ -296,8 +311,11 @@ log "playlist=${#PLAYLIST_IDS[@]} pending=${#PLAYLIST_NEW[@]}"
 #   $CHANNELS_DIR/<handle>.discovered, which feeds both the round-robin
 #   fan-out ordering below and the post-fan-out cursor advance.
 if [[ -f "$CHANNELS_FILE" ]]; then
-    mapfile -t HANDLES < <(yq -r '.channels[].handle' "$CHANNELS_FILE")
-    for handle in "${HANDLES[@]}"; do
+    HANDLES=()
+    while IFS= read -r _line || [[ -n "$_line" ]]; do
+        HANDLES+=("$_line")
+    done < <(yq -r '.channels[].handle' "$CHANNELS_FILE")
+    for handle in ${HANDLES[@]+"${HANDLES[@]}"}; do
         handle="${handle#@}"
         [[ -n "$handle" ]] || continue
         url="https://www.youtube.com/@${handle}/videos"
@@ -434,9 +452,13 @@ shopt -s nullglob
 SOURCE_FILES+=("$CHANNELS_DIR"/*.discovered)
 shopt -u nullglob
 
-mapfile -t NEW < <(
+# Built via a temp file rather than `< <( ... )`: bash 3.2's parser cannot
+# handle a MULTI-LINE process substitution and dies at runtime with
+# "bad substitution: no closing `)' in <(". Single-line ones are fine.
+QUEUE_FILE="$(mktemp)"
+{
     {
-        printf '%s\n' "${ORPHAN_NEW[@]}"
+        printf '%s\n' ${ORPHAN_NEW[@]+"${ORPHAN_NEW[@]}"}
         if (( ${#SOURCE_FILES[@]} > 0 )); then
             # Round-robin by recency rank: rows keyed (source, rank); emit
             # rank-major so slot N draws each source's Nth-newest in turn.
@@ -452,7 +474,13 @@ mapfile -t NEW < <(
             ' "${SOURCE_FILES[@]}"
         fi
     } | awk 'NF && !seen[$0]++'
-)
+} > "$QUEUE_FILE"
+
+NEW=()
+while IFS= read -r _line || [[ -n "$_line" ]]; do
+    NEW+=("$_line")
+done < "$QUEUE_FILE"
+rm -f "$QUEUE_FILE"
 if [[ -n "$PLAYLIST_PENDING" ]]; then rm -f "$PLAYLIST_PENDING"; fi
 
 # Defense-in-depth: a YouTube video ID is exactly 11 chars of [A-Za-z0-9_-].
@@ -460,14 +488,14 @@ if [[ -n "$PLAYLIST_PENDING" ]]; then rm -f "$PLAYLIST_PENDING"; fi
 # queued yt-dlp usage lines like "Options:" as IDs) — drop it loudly rather
 # than fan out an ingest worker on it.
 SANE=()
-for ID in "${NEW[@]}"; do
+for ID in ${NEW[@]+"${NEW[@]}"}; do
     if [[ "$ID" =~ ^[A-Za-z0-9_-]{11}$ ]]; then
         SANE+=("$ID")
     else
         log "dropping junk id from queue: $ID"
     fi
 done
-NEW=("${SANE[@]}")
+NEW=(${SANE[@]+"${SANE[@]}"})
 
 # Staleness backstop. Every other check in this script asks "did this step
 # fail?"; none asks "is this pipeline still producing anything?". A config that
@@ -554,7 +582,7 @@ fi
 
 # Recount from state file (authoritative).
 INGESTED=0
-for ID in "${NEW[@]}"; do
+for ID in ${NEW[@]+"${NEW[@]}"}; do
     grep -Fxq -- "$ID" "$STATE" && INGESTED=$((INGESTED + 1))
 done
 FAILED=$(( ${#NEW[@]} - INGESTED ))
@@ -573,7 +601,10 @@ for discovered in "$CHANNELS_DIR"/*.discovered; do
         rm -f "$discovered" "$discovered.partial"
         continue
     fi
-    mapfile -t ids < "$discovered"
+    ids=()
+    while IFS= read -r _line || [[ -n "$_line" ]]; do
+        ids+=("$_line")
+    done < "$discovered"
     new_cursor=""
     for ((i = ${#ids[@]} - 1; i >= 0; i--)); do
         if grep -Fxq -- "${ids[$i]}" "$STATE"; then
