@@ -65,6 +65,8 @@ settle (see **Playlist-ingest workflow** below).
 | `YOUTUBE_CHANNELS_FILE` | `$XDG_CONFIG_HOME/ytt/channels.yaml` | Needs review |
 | `YOUTUBE_INGEST_STALE_DAYS` | `7` | Needs review |
 | `YOUTUBE_INGEST_STATE_DIR` | `$XDG_STATE_HOME/ytt` | Needs review |
+| `YOUTUBE_INGEST_SLACK_TOKEN_FILE` | `$XDG_CONFIG_HOME/ytt/slack-token` | Needs review |
+| `YOUTUBE_INGEST_SLACK_DM` | (unset) | Needs review |
 | `YOUTUBE_INGEST_SLACK_WEBHOOK_FILE` | `$XDG_CONFIG_HOME/ytt/slack-webhook` | Needs review |
 | `YOUTUBE_INGEST_NOTIFY_BANNER` | `1` | Needs review |
 | `YOUTUBE_INGEST_NOTIFY_RENOTIFY_DAYS` | `7` | Needs review |

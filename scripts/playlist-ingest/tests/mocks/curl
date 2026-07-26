@@ -33,6 +33,20 @@ if $is_post; then
     if [[ -n "${MOCK_CURL_POST_LOG:-}" ]]; then
         printf 'POST %s %s\n' "$url" "$payload" >> "$MOCK_CURL_POST_LOG"
     fi
+    # Slack Web API calls answer with a JSON body and, crucially, return HTTP
+    # 200 even for logical failures — so the mock emits {"ok":false,...} rather
+    # than a non-zero exit. MOCK_SLACK_API_ERROR picks the error string.
+    if [[ "$url" == *slack.com/api/* ]]; then
+        if [[ -n "${MOCK_SLACK_API_ERROR:-}" ]]; then
+            printf '{"ok":false,"error":"%s"}\n' "$MOCK_SLACK_API_ERROR"
+        elif [[ -n "${MOCK_SLACK_API_UNPARSEABLE:-}" ]]; then
+            printf '<html>502 Bad Gateway</html>\n'
+        else
+            printf '{"ok":true,"channel":"D123","ts":"1700000000.000100"}\n'
+        fi
+        [[ -n "${MOCK_CURL_POST_FAIL:-}" ]] && exit 22
+        exit 0
+    fi
     [[ -n "${MOCK_CURL_POST_FAIL:-}" ]] && exit 22
     exit 0
 fi

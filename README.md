@@ -146,7 +146,9 @@ $YOUTUBE_INGEST_ROOT/
 | `YOUTUBE_INGEST_NETWORK_WAIT` | `14400` | Seconds to wait (awake-time) for connectivity before giving up — covers launchd ticks that fire in a no-network DarkWake window. |
 | `YOUTUBE_INGEST_STALE_DAYS` | `7` | Days of zero ingests (with channels tracked) before the run is judged unhealthy. `0` disables the check. |
 | `YOUTUBE_INGEST_STATE_DIR` | `~/.local/state/ytt` | Where liveness and alert-dedup state live. Kept out of the content tree. |
-| `YOUTUBE_INGEST_SLACK_WEBHOOK_FILE` | `~/.config/ytt/slack-webhook` | File holding a Slack incoming-webhook URL, mode `600`. See [Alerting](#alerting). |
+| `YOUTUBE_INGEST_SLACK_TOKEN_FILE` | `~/.config/ytt/slack-token` | File holding a Slack bot token, mode `600`. See [Alerting](#alerting). |
+| `YOUTUBE_INGEST_SLACK_DM` | (unset) | Slack user ID to DM (e.g. `U01234567`). Required for the DM sink. |
+| `YOUTUBE_INGEST_SLACK_WEBHOOK_FILE` | `~/.config/ytt/slack-webhook` | Fallback: file holding an incoming-webhook URL, mode `600`. Webhooks post to one channel and cannot DM. |
 | `YOUTUBE_INGEST_NOTIFY_BANNER` | `1` | Set `0` to suppress the macOS notification banner. |
 | `YOUTUBE_INGEST_NOTIFY_RENOTIFY_DAYS` | `7` | Days before an unchanged, unresolved problem alerts again. `0` never re-alerts. |
 
@@ -202,16 +204,35 @@ A scheduled job that only complains into its own log fails silently,
 because nobody reads a log daily. Unhealthy runs therefore alert
 out-of-band via `notify.sh`:
 
+Preferred sink is a **direct message** via a bot token:
+
+1. https://api.slack.com/apps → **Create New App** → From scratch
+2. **OAuth & Permissions** → Bot Token Scopes → add `chat:write` and `im:write`
+3. **Install to Workspace**, copy the `xoxb-…` Bot User OAuth Token
+4. Find your member ID: Slack profile → ⋮ → *Copy member ID*
+
 ```sh
-# Slack: create an incoming webhook, then
 mkdir -p ~/.config/ytt
-printf '%s\n' 'https://hooks.slack.com/services/…' > ~/.config/ytt/slack-webhook
-chmod 600 ~/.config/ytt/slack-webhook
+printf '%s\n' 'xoxb-…' > ~/.config/ytt/slack-token
+chmod 600 ~/.config/ytt/slack-token
+export YOUTUBE_INGEST_SLACK_DM=U01234567     # your member ID
 ```
 
-The webhook URL is a secret; `notify.sh` refuses to read the file unless
-it is mode `600`/`400`. With no webhook configured it falls back to a
-macOS notification banner. A run is unhealthy when any of these hold:
+An incoming webhook is supported as a fallback
+(`~/.config/ytt/slack-webhook`) but is bound to a single channel at
+creation time and **cannot DM**.
+
+Both files are secrets; `notify.sh` refuses to read either unless it is
+mode `600`/`400`. With neither configured it falls back to a macOS
+notification banner.
+
+> **Why not the claude.ai Slack connector?** It is a Claude *session*
+> capability, and the scheduler runs bash, not Claude. Measured on
+> 2026-07-26, a fresh headless `claude -p` had the Slack tools in 1 of 6
+> runs. Alerting has to work exactly when things are broken, so it gets
+> its own credential and a plain HTTPS call with no LLM in the path.
+
+A run is unhealthy when any of these hold:
 
 - a preflight abort (missing `ytt`/`claude`/`curl`, or network never returned)
 - a discovery source failed (playlist or channel feed)

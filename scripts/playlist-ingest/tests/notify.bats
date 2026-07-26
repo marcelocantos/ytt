@@ -20,6 +20,11 @@ setup() {
     printf 'https://hooks.slack.test/services/T000/B000/secret\n' > "$WEBHOOK_FILE"
     chmod 600 "$WEBHOOK_FILE"
 
+    TOKEN_FILE="$XDG_CONFIG_HOME/ytt/slack-token"
+    printf 'xoxb-test-token\n' > "$TOKEN_FILE"
+    chmod 600 "$TOKEN_FILE"
+    export YOUTUBE_INGEST_SLACK_DM=U2TESTUSER
+
     POST_LOG="$BATS_TEST_TMPDIR/posts"
     export MOCK_CURL_POST_LOG="$POST_LOG"
 }
@@ -50,13 +55,17 @@ post_count() {
     printf '%s' "${n:-0}"
 }
 
-@test "a problem posts to the Slack webhook with the subject and body" {
+@test "a problem is delivered as a Slack DM to the configured user" {
     notify problem "ytt ingest unhealthy: nothing to do" "channels config MISSING at /nope.yaml"
 
     [ "$status" -eq 0 ]
-    [[ "$(posts)" == *"https://hooks.slack.test/services/T000/B000/secret"* ]]
+    [[ "$output" == *"sent Slack DM to U2TESTUSER"* ]]
+    [[ "$(posts)" == *"slack.com/api/chat.postMessage"* ]]
+    [[ "$(posts)" == *"U2TESTUSER"* ]]
     [[ "$(posts)" == *"ytt ingest unhealthy"* ]]
     [[ "$(posts)" == *"channels config MISSING"* ]]
+    # The DM sink wins outright: no webhook call at all.
+    [[ "$(posts)" != *"hooks.slack.test"* ]]
 }
 
 @test "the payload is valid JSON even with quotes, newlines and em-dashes" {
@@ -139,8 +148,9 @@ assert "— dashed" in text, text
     [ "$(post_count)" -eq 0 ]
 }
 
-@test "a group-readable webhook file is refused, not used" {
-    chmod 644 "$WEBHOOK_FILE"
+@test "a group-readable token file is refused, not used" {
+    chmod 644 "$TOKEN_FILE"
+    rm -f "$WEBHOOK_FILE"
 
     notify problem "unhealthy: something" "detail"
 
@@ -151,7 +161,63 @@ assert "— dashed" in text, text
     [ "$(post_count)" -eq 0 ]
 }
 
+@test "a group-readable webhook file is refused, not used" {
+    rm -f "$TOKEN_FILE"
+    chmod 644 "$WEBHOOK_FILE"
+
+    notify problem "unhealthy: something" "detail"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"refusing to read"* ]]
+    [ "$(post_count)" -eq 0 ]
+}
+
+@test "a Slack API error is surfaced verbatim, not swallowed as success" {
+    # chat.postMessage answers HTTP 200 with {"ok":false,...} for bad tokens and
+    # missing scopes, so trusting the HTTP status would report a phantom send.
+    export MOCK_SLACK_API_ERROR=missing_scope
+    rm -f "$WEBHOOK_FILE"
+
+    notify problem "unhealthy: something" "detail"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Slack DM FAILED (missing_scope)"* ]]
+    [[ "$output" == *"NO sink delivered"* ]]
+}
+
+@test "a non-JSON Slack response is treated as failure, not success" {
+    export MOCK_SLACK_API_UNPARSEABLE=1
+    rm -f "$WEBHOOK_FILE"
+
+    notify problem "unhealthy: something" "detail"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Slack DM FAILED"* ]]
+}
+
+@test "the webhook is used as a fallback when no DM token is configured" {
+    rm -f "$TOKEN_FILE"
+    unset YOUTUBE_INGEST_SLACK_DM
+
+    notify problem "unhealthy: something" "detail"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"posted to Slack webhook"* ]]
+    [[ "$(posts)" == *"hooks.slack.test"* ]]
+}
+
+@test "a failed DM falls back to the webhook rather than going undelivered" {
+    export MOCK_SLACK_API_ERROR=channel_not_found
+
+    notify problem "unhealthy: something" "detail"
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Slack DM FAILED (channel_not_found)"* ]]
+    [[ "$output" == *"posted to Slack webhook"* ]]
+}
+
 @test "an explicit webhook env var overrides the config file" {
+    rm -f "$TOKEN_FILE"
     export YOUTUBE_INGEST_SLACK_WEBHOOK="https://hooks.slack.test/services/ENV/OVERRIDE/x"
 
     notify problem "unhealthy: something" "detail"
@@ -163,17 +229,18 @@ assert "— dashed" in text, text
 @test "a failing webhook is reported but never fails the caller" {
     # ingest.sh treats alerting as a side channel: a broken webhook must not
     # turn a successful ingest into a failed run.
+    rm -f "$TOKEN_FILE"
     export MOCK_CURL_POST_FAIL=1
 
     notify problem "unhealthy: something" "detail"
 
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Slack POST FAILED"* ]]
+    [[ "$output" == *"webhook POST FAILED"* ]]
     [[ "$output" == *"NO sink delivered"* ]]
 }
 
 @test "no configured sink at all is reported loudly on stderr" {
-    rm -f "$WEBHOOK_FILE"
+    rm -f "$WEBHOOK_FILE" "$TOKEN_FILE"
 
     notify problem "unhealthy: something" "detail"
 

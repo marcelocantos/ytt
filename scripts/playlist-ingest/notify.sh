@@ -17,14 +17,28 @@
 # Sinks (all configured ones are attempted; the first success is enough for the
 # alert to count as delivered):
 #
-#   Slack   POST to an incoming-webhook URL, taken from the first of:
-#             $YOUTUBE_INGEST_SLACK_WEBHOOK      (URL, for ad-hoc use)
-#             $YOUTUBE_INGEST_SLACK_WEBHOOK_FILE (file containing the URL)
-#             $XDG_CONFIG_HOME/ytt/slack-webhook (default location)
-#           The URL is a secret and MUST NOT be committed: keep it in the file,
-#           mode 600. A file whose permissions are group/world-readable is
-#           refused rather than used, so a careless `chmod` fails loudly here
-#           instead of quietly leaking a webhook that can post to the channel.
+#   Slack DM  (preferred) chat.postMessage with a bot token, to the user in
+#             $YOUTUBE_INGEST_SLACK_DM. Token from $YOUTUBE_INGEST_SLACK_TOKEN,
+#             else $YOUTUBE_INGEST_SLACK_TOKEN_FILE, else
+#             $XDG_CONFIG_HOME/ytt/slack-token. Needs scope chat:write (plus
+#             im:write to open the DM). A DM is the right shape for a personal
+#             scheduler; it also survives channel reorganisation.
+#
+#             NOT the claude.ai Slack connector: that is a Claude *session*
+#             capability, and launchd runs bash. Measured 2026-07-26, a fresh
+#             `claude -p` had the Slack tools in 1 of 6 runs. Alerting must work
+#             exactly when things are broken, so it gets its own credential and
+#             a plain HTTPS call with no LLM in the path.
+#
+#   Slack ch  (fallback) POST to an incoming-webhook URL from
+#             $YOUTUBE_INGEST_SLACK_WEBHOOK / _FILE / the default
+#             $XDG_CONFIG_HOME/ytt/slack-webhook. Webhooks are bound to one
+#             channel at creation and cannot DM.
+#
+#           Both are secrets and MUST NOT be committed: keep them in files,
+#           mode 600. A group/world-readable file is refused rather than used,
+#           so a careless `chmod` fails loudly here instead of quietly leaking
+#           a credential that can post to the workspace.
 #
 #   macOS   A notification-centre banner via osascript. Zero configuration, so
 #           it works out of the box, but only reaches you at the machine —
@@ -118,52 +132,97 @@ MESSAGE="$SUBJECT"
 
 DELIVERED=false
 
-# ---- Slack ------------------------------------------------------------------
-WEBHOOK=""
-WEBHOOK_FILE="${YOUTUBE_INGEST_SLACK_WEBHOOK_FILE:-$CONFIG_DIR/slack-webhook}"
-if [[ -n "${YOUTUBE_INGEST_SLACK_WEBHOOK:-}" ]]; then
-    WEBHOOK="$YOUTUBE_INGEST_SLACK_WEBHOOK"
-elif [[ -f "$WEBHOOK_FILE" ]]; then
-    # Refuse a group/world-readable secret rather than use it: this is the one
-    # moment we can catch a leaked webhook, and a loud refusal beats a quiet
-    # compromise.
-    #
-    # Probing the mode portably needs care: `stat -c` is GNU and `stat -f` is
-    # BSD, but GNU's `-f` means "filesystem status" and EXITS 0 while printing
-    # the format string back, so a naive `-f || -c` chain silently yields
-    # garbage on Linux. Hence: try GNU, keep the answer only if it looks like an
-    # octal mode, then try BSD.
-    mode="$(stat -c '%a' "$WEBHOOK_FILE" 2>/dev/null || true)"
-    [[ "$mode" =~ ^[0-7]+$ ]] || mode="$(stat -f '%Lp' "$WEBHOOK_FILE" 2>/dev/null || true)"
+# ---- Slack -------------------------------------------------------------------
+# Read a secret from a file, refusing it if the permissions are loose. This is
+# the one moment we can catch a leaked credential, and a loud refusal beats a
+# quiet compromise.
+#
+# Probing the mode portably needs care: `stat -c` is GNU and `stat -f` is BSD,
+# but GNU's `-f` means "filesystem status" and EXITS 0 while printing the format
+# string back, so a naive `-f || -c` chain silently yields garbage on Linux.
+# Hence: try GNU, keep the answer only if it looks like an octal mode, then BSD.
+read_secret() {
+    local f="$1" mode
+    [[ -f "$f" ]] || return 1
+    mode="$(stat -c '%a' "$f" 2>/dev/null || true)"
+    [[ "$mode" =~ ^[0-7]+$ ]] || mode="$(stat -f '%Lp' "$f" 2>/dev/null || true)"
     [[ "$mode" =~ ^[0-7]+$ ]] || mode=""
     if [[ -z "$mode" ]]; then
         # Undeterminable mode: proceed rather than block the alert, but say so —
-        # refusing here would mean never alerting at all on this platform.
-        echo "notify: cannot determine permissions of $WEBHOOK_FILE; using it anyway" >&2
-        WEBHOOK="$(head -1 "$WEBHOOK_FILE" | tr -d '[:space:]')"
+        # refusing here would mean never alerting at all on such a platform.
+        echo "notify: cannot determine permissions of $f; using it anyway" >&2
     elif (( 8#$mode & 8#77 )); then
-        echo "notify: refusing to read $WEBHOOK_FILE — mode $mode grants group/other access; run: chmod 600 $WEBHOOK_FILE" >&2
+        echo "notify: refusing to read $f — mode $mode grants group/other access; run: chmod 600 $f" >&2
+        return 1
+    fi
+    head -1 "$f" | tr -d '[:space:]'
+}
+
+# JSON is built by python3, never by shell string-splicing: the body carries
+# newlines, quotes and em-dashes, and hand-rolled escaping of those is exactly
+# how alerting breaks on the day it matters.
+json_payload() {
+    SLACK_TEXT="$MESSAGE" SLACK_CHANNEL="$1" python3 -c \
+        'import json, os; print(json.dumps({"channel": os.environ["SLACK_CHANNEL"], "text": os.environ["SLACK_TEXT"]}))'
+}
+
+TOKEN_FILE="${YOUTUBE_INGEST_SLACK_TOKEN_FILE:-$CONFIG_DIR/slack-token}"
+WEBHOOK_FILE="${YOUTUBE_INGEST_SLACK_WEBHOOK_FILE:-$CONFIG_DIR/slack-webhook}"
+SLACK_DM="${YOUTUBE_INGEST_SLACK_DM:-}"
+
+TOKEN="${YOUTUBE_INGEST_SLACK_TOKEN:-}"
+[[ -n "$TOKEN" ]] || TOKEN="$(read_secret "$TOKEN_FILE" || true)"
+
+# Preferred sink: a bot token posting a direct message. A DM is the right shape
+# for a personal scheduler — an incoming webhook is bound to one channel chosen
+# at creation time and cannot DM at all.
+#
+# Deliberately NOT used here: the claude.ai Slack connector. It is a Claude
+# *session* capability; a fresh `claude -p` run showed the Slack tools once out
+# of six invocations and launchd runs bash, not Claude. Alerting must work
+# exactly when things are broken, so it gets its own credential and a plain
+# HTTPS call with no LLM in the path.
+if [[ -n "$TOKEN" && -n "$SLACK_DM" ]]; then
+    if ! command -v curl >/dev/null; then
+        echo "notify: curl unavailable; cannot reach Slack" >&2
     else
-        WEBHOOK="$(head -1 "$WEBHOOK_FILE" | tr -d '[:space:]')"
+        # chat.postMessage returns HTTP 200 with {"ok":false,"error":"..."} for
+        # logical failures (bad token, missing scope, unknown user), so the HTTP
+        # status alone is not success — the body has to be parsed. Surface
+        # Slack's error verbatim; it names the exact misconfiguration.
+        resp="$(curl -sS --max-time 20 -X POST \
+            -H "Authorization: Bearer $TOKEN" \
+            -H 'Content-Type: application/json; charset=utf-8' \
+            --data "$(json_payload "$SLACK_DM")" \
+            https://slack.com/api/chat.postMessage 2>/dev/null || true)"
+        slack_err="$(printf '%s' "$resp" | python3 -c \
+            'import json,sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print("unparseable response"); raise SystemExit
+print("" if d.get("ok") else (d.get("error") or "unknown error"))' 2>/dev/null || printf 'unparseable response')"
+        if [[ -z "$slack_err" ]]; then
+            echo "notify: sent Slack DM to $SLACK_DM"
+            DELIVERED=true
+        else
+            echo "notify: Slack DM FAILED ($slack_err)" >&2
+        fi
     fi
 fi
 
-if [[ -n "$WEBHOOK" ]]; then
-    if ! command -v curl >/dev/null; then
-        echo "notify: curl unavailable; cannot post to Slack" >&2
-    else
-        # Build the JSON with a heredoc-free python one-liner: the body contains
-        # newlines, quotes, and em-dashes, and hand-rolled shell escaping of
-        # those into JSON is exactly how alerting breaks on the day it matters.
-        payload="$(SLACK_TEXT="$MESSAGE" python3 -c \
-            'import json, os; print(json.dumps({"text": os.environ["SLACK_TEXT"]}))')"
+# Fallback sink: an incoming webhook, for a channel rather than a DM.
+if ! $DELIVERED; then
+    WEBHOOK="${YOUTUBE_INGEST_SLACK_WEBHOOK:-}"
+    [[ -n "$WEBHOOK" ]] || WEBHOOK="$(read_secret "$WEBHOOK_FILE" || true)"
+    if [[ -n "$WEBHOOK" ]] && command -v curl >/dev/null; then
         if curl -fsS --max-time 20 -X POST \
                 -H 'Content-Type: application/json' \
-                --data "$payload" "$WEBHOOK" -o /dev/null; then
-            echo "notify: posted to Slack"
+                --data "$(json_payload "")" "$WEBHOOK" -o /dev/null; then
+            echo "notify: posted to Slack webhook"
             DELIVERED=true
         else
-            echo "notify: Slack POST FAILED (webhook unreachable or rejected)" >&2
+            echo "notify: Slack webhook POST FAILED (unreachable or rejected)" >&2
         fi
     fi
 fi
