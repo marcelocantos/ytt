@@ -46,11 +46,13 @@
 #              with no Wi-Fi, where every DNS lookup fails.
 #              $YOUTUBE_INGEST_NETWORK_WAIT caps the wait (default 14400s);
 #              $YOUTUBE_INGEST_NETWORK_POLL sets the poll interval (default 60s).
-# Alerts:      an unhealthy run hands a one-line verdict plus the offending log
-#              lines to ./notify.sh, which fans out to Slack and/or a macOS
-#              banner. Nobody reads a log file daily, so a scheduled job that
-#              can only complain into its own log is a job that fails silently.
-#              See notify.sh for sink configuration.
+# Alerts:      an unhealthy run reports a one-line verdict plus the offending
+#              log lines to `blurter send`, which spools the event; the blurter
+#              daemon owns delivery (Slack DM, desktop banner), dedup and
+#              recovery notices. Nobody reads a log file daily, so a scheduled
+#              job that can only complain into its own log is a job that fails
+#              silently. blurter is a hard dependency; see its README for
+#              configuration.
 # Staleness:   a run is also unhealthy if channels are tracked but NOTHING has
 #              been ingested for $YOUTUBE_INGEST_STALE_DAYS days (default 7,
 #              0 disables). This is the backstop for the whole "every step
@@ -124,7 +126,13 @@ fi
 # tree, and health bookkeeping is machine state, not knowledge.
 STATE_DIR="${YOUTUBE_INGEST_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/ytt}"
 STALE_DAYS="${YOUTUBE_INGEST_STALE_DAYS:-7}"
-NOTIFY_BIN="${YOUTUBE_INGEST_NOTIFY_BIN:-$HERE/notify.sh}"
+# Notification is blurter's job, not ours. ytt reports events; blurter owns the
+# credential, the delivery policy (dedup, re-notify windows, recovery notices)
+# and the sinks. This is a hard dependency, declared by the Homebrew formula:
+# keeping a private fallback notifier would preserve exactly the duplicated,
+# subtly-wrong delivery logic that moving to blurter removes, and the fallback
+# is the path that would run when it mattered.
+BLURTER_BIN="${YOUTUBE_INGEST_BLURTER_BIN:-blurter}"
 
 export YOUTUBE_INGEST_ROOT="$ROOT"
 
@@ -144,28 +152,38 @@ note_issue() {
     log "UNHEALTHY: $*"
 }
 
-# Hand a verdict to the notifier. Alerting is a side channel: a broken webhook
-# must never change the run's outcome, so notifier failures are logged and
+# Report a verdict to blurter. Alerting is a side channel: a notification
+# problem must never change the run's outcome, so failures here are logged and
 # swallowed rather than propagated.
+#
+# `blurter send` writes an event to a spool and exits, so this neither blocks on
+# the network nor needs a credential, and an alert raised while the machine is
+# offline is still delivered later. Exit 0 means spooled, not delivered.
 notify() {
-    local status="$1" subject="$2"; shift 2
+    local severity="$1" subject="$2"; shift 2
     if $DRY_RUN; then
-        # A diagnostic run must not page anyone, and must not touch the
-        # notifier's dedup state — otherwise debugging suppresses the real
-        # alert that the next scheduled run needs to send.
-        log "dry run: would notify [$status] $subject"
+        # A diagnostic run must not page anyone, and must not touch blurter's
+        # dedup state — otherwise debugging suppresses the real alert that the
+        # next scheduled run needs to send.
+        log "dry run: would report [$severity] $subject"
         return 0
     fi
-    if [[ ! -x "$NOTIFY_BIN" ]]; then
-        log "no executable notifier at $NOTIFY_BIN; alert not sent"
+    if ! command -v "$BLURTER_BIN" >/dev/null; then
+        log "blurter not found on PATH ($BLURTER_BIN); alert not reported"
         return 0
     fi
-    # $LOG goes across too: the banner's click action opens it, so the notifier
-    # must know where this run actually logged rather than guessing the default.
+    # --link points blurter's notification click action at this run's log.
+    # --key collapses repeats: the counts in $subject vary run to run while the
+    # underlying problem does not, and blurter would otherwise treat every run
+    # as a fresh problem and alert nightly.
+    # SC2094: --link only passes $LOG's path as an argument; nothing reads the
+    # file here, so writing to it in the same pipeline is safe.
+    # shellcheck disable=SC2094
     if ! printf '%s\n' "$@" \
-            | YOUTUBE_INGEST_STATE_DIR="$STATE_DIR" YOUTUBE_INGEST_LOG="$LOG" \
-              "$NOTIFY_BIN" "$status" "$subject" >>"$LOG" 2>&1; then
-        log "notifier failed (see $LOG); continuing"
+            | "$BLURTER_BIN" send --app ytt --severity "$severity" \
+                --subject "$subject" --body - --key "ytt-ingest-$severity" \
+                --link "$LOG" --quiet >>"$LOG" 2>&1; then
+        log "reporting to blurter failed (see $LOG); continuing"
     fi
 }
 

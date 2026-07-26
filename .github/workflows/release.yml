@@ -106,11 +106,16 @@ jobs:
           # watchdog silently become no-ops — the exact failure mode those
           # timeouts exist to prevent (a stalled call wedging the run, and thus
           # every future scheduled run).
+          # blurter is a hard dependency: ytt reports notification events to it
+          # and has no notifier of its own. Declaring it means `brew install
+          # ytt` yields a working alerting path rather than one that silently
+          # does nothing.
           depends_on: |
             "yt-dlp"
             "jq"
             "yq"
             "coreutils"
+            "marcelocantos/tap/blurter"
           test: 'assert_match "ytt #{version}", shell_output("#{bin}/ytt --version")'
           target_darwin_arm64: true
           target_linux_amd64: true

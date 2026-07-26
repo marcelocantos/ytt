@@ -21,14 +21,14 @@
     must never be resolved from a package-managed directory.
   - Logs go to ~/.local/var/log/youtube-ingest/, NOT into ~/think, so scheduled
     runs don't produce auto-sync commits in the knowledge-base content tree.
-  - Unhealthy runs alert out-of-band via notify.sh, as a Slack DM (bot token in
-    ~/.config/ytt/slack-token, mode 600) with a macOS banner fallback. launchd
-    records an exit code and tells nobody, so the exit code alone is not a
-    monitoring strategy. The claude.ai Slack connector is deliberately not used:
-    it is a Claude session capability and this job runs bash — measured
-    2026-07-26, a fresh `claude -p` had the Slack tools in 1 of 6 runs.
-    YOUTUBE_INGEST_SLACK_DM is a member ID, not a secret; the token is never
-    committed.
+  - Unhealthy runs report events to blurter, which owns the Slack credential,
+    the delivery policy and the sinks. launchd records an exit code and tells
+    nobody, so the exit code alone is not a monitoring strategy. blurter is
+    pinned to an absolute path here for the same reason ytt and claude are:
+    launchd's minimal PATH would not otherwise find it. The claude.ai Slack
+    connector is deliberately not in this path — it is a Claude session
+    capability and this job runs bash (measured 2026-07-26, a fresh `claude -p`
+    had the Slack tools in 1 of 6 runs).
   - Paths are absolute and machine-specific (this is a personal scheduler);
     adjust the home path if installing elsewhere.
   - This is a stopgap until ytt ingest migrates onto crosshair (ytt T7),
@@ -56,8 +56,8 @@
         <string>/Users/marcelo/.local/bin/claude</string>
         <key>YOUTUBE_CHANNELS_FILE</key>
         <string>/Users/marcelo/.config/ytt/channels.yaml</string>
-        <key>YOUTUBE_INGEST_SLACK_DM</key>
-        <string>U2RUCKX61</string>
+        <key>YOUTUBE_INGEST_BLURTER_BIN</key>
+        <string>/opt/homebrew/bin/blurter</string>
         <key>YOUTUBE_INGEST_LOG</key>
         <string>/Users/marcelo/.local/var/log/youtube-ingest/ingest.log</string>
     </dict>

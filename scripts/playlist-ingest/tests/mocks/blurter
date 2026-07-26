@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Mock blurter — records what ytt reported, so tests can assert on the events
+# submitted without a spool, a daemon, or a network. Delivery is blurter's own
+# test suite's problem, not ytt's; that separation is the point of the split.
+#
+# Appends one record per call to $BLURTER_LOG:
+#   send <severity> <subject>
+#   > <body line>
+set -euo pipefail
+
+: "${BLURTER_LOG:?blurter mock needs BLURTER_LOG}"
+
+[[ -n "${MOCK_BLURTER_FAIL:-}" ]] && exit 1
+
+cmd="${1:-}"; shift || true
+severity="" subject="" body=false
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --severity) severity="$2"; shift 2 ;;
+        --subject)  subject="$2";  shift 2 ;;
+        --body)     [[ "$2" == "-" ]] && body=true; shift 2 ;;
+        --app|--key|--link) shift 2 ;;
+        *) shift ;;
+    esac
+done
+
+printf '%s %s %s\n' "$cmd" "$severity" "$subject" >> "$BLURTER_LOG"
+if $body; then sed 's/^/> /' >> "$BLURTER_LOG"; else cat >/dev/null 2>&1 || true; fi
