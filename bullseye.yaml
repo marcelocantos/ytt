@@ -127,7 +127,7 @@ targets:
     discovered: 2026-07-26
   T13:
     name: Alert delivery does not silently downgrade because of how the run was invoked
-    status: identified
+    status: achieved
     value: 0.0
     cost: 0.0
     acceptance:
@@ -141,6 +141,7 @@ targets:
       This is the same defect class as the bug the release fixes: required configuration living somewhere invocation-dependent, degrading silently instead of complaining. The token sits in ~/.config/ytt/slack-token but its companion target does not, so the pair can only be half-configured. Storing the target beside the token makes the sink self-contained, and a loud warning when a token has no target removes the silent-downgrade path entirely.
     origin: manual
     discovered: 2026-07-26
+    achieved: 2026-07-26
   T2:
     name: Homebrew formula declares yt-dlp, jq, and yq as runtime deps so the bundled playlist-ingest scripts work on a clean install
     status: achieved
