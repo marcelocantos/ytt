@@ -96,20 +96,23 @@ targets:
     achieved: 2026-07-04
   T11:
     name: An unhealthy scheduled ingest reaches the operator out-of-band, and a pipeline that stops producing is treated as a failure
-    status: converging
+    status: achieved
     value: 0.0
     cost: 0.0
     acceptance:
     - Every unhealthy outcome (preflight abort, discovery failure, orphaned config, per-video failure, watchdog expiry, spend limit, index-refresh failure) routes through a single exit path that both fails the run and emits an alert — no failure mode can be added that fails silently.
-    - Alerts deliver to Slack via an incoming webhook read from a mode-600 file outside the repo, with a macOS banner fallback when no webhook is configured.
+    - Alerts deliver to Slack as a direct message via chat.postMessage with a bot token read from a mode-600 file outside the repo, with an incoming webhook as a fallback sink and a macOS banner when neither is configured.
+    - Slack's response body is parsed rather than trusting the HTTP status, since chat.postMessage returns 200 with ok:false for bad tokens and missing scopes.
     - A notification failure never changes the run's exit status.
     - Repeat alerts are deduplicated by problem digest, re-alerting only after a configurable window, and a single RECOVERED notice is sent when the problem clears.
     - A liveness check fails the run when nothing has been ingested for YOUTUBE_INGEST_STALE_DAYS while channels are tracked, so 'every step succeeded and yet no knowledge arrived' is detectable without a human noticing.
     - '`ytt ingest --dry-run` reports resolved config and the would-be queue without fetching, spending, or alerting.'
     - bats coverage for all of the above passes on both macOS and the Ubuntu CI runner.
+    - Delivery is verified end-to-end with a real message, not only against mocks.
     context: 'Filed 2026-07-26 after the second 🎯T7.1 regression. The pipeline had accumulated 18 PRs of hardening — per-call timeouts, a run watchdog, network gating, orphan sweeps, cursor-invariant repair, non-zero exits on partial batches — and still lost 15 days of channel ingest without anyone noticing. Every one of those checks answers "did this step fail?"; none answered "is this thing still producing anything?", and the one signal that did fire (launchd''s exit code) had no reader. Two structural conclusions: (1) exit codes are not monitoring — something must actively push a message to a human; (2) a scheduled pipeline needs at least one check that fires on a NON-event, because the silent-success failure mode is invisible to per-step checks by construction.'
     origin: manual
     discovered: 2026-07-26
+    achieved: 2026-07-26
   T2:
     name: Homebrew formula declares yt-dlp, jq, and yq as runtime deps so the bundled playlist-ingest scripts work on a clean install
     status: achieved
