@@ -353,8 +353,8 @@ load lib
     [[ "$output" == *"channels config MISSING"* ]]
     [[ "$output" == *"the config was orphaned, not disabled"* ]]
     [[ "$output" == *"natebjones"* ]]
-    [[ "$(notifications)" == *"problem ytt ingest unhealthy"* ]]
-    [[ "$(notifications)" == *"channels config MISSING"* ]]
+    [[ "$(reported)" == *"send problem ytt ingest unhealthy"* ]]
+    [[ "$(reported)" == *"channels config MISSING"* ]]
 }
 
 @test "no channels config and no cursors is a legitimate playlist-only setup (silent, exit 0)" {
@@ -368,7 +368,7 @@ load lib
     [ "$status" -eq 0 ]
     [[ "$output" == *"skipping channel ingest"* ]]
     [[ "$output" != *"config was orphaned"* ]]
-    [[ "$(notifications)" != *problem* ]]
+    [[ "$(reported)" != *problem* ]]
 }
 
 @test "channels config resolves from XDG config dir, not the install directory" {
@@ -413,7 +413,7 @@ load lib
     [ "$status" -eq 1 ]
     [[ "$output" == *"nothing ingested for 15 days"* ]]
     [[ "$output" == *"reporting success while producing nothing"* ]]
-    [[ "$(notifications)" == *"problem ytt ingest unhealthy"* ]]
+    [[ "$(reported)" == *"send problem ytt ingest unhealthy"* ]]
 }
 
 @test "staleness: quiet playlist-only setup never trips the check" {
@@ -426,7 +426,7 @@ load lib
 
     [ "$status" -eq 0 ]
     [[ "$output" != *"nothing ingested for"* ]]
-    [[ "$(notifications)" != *problem* ]]
+    [[ "$(reported)" != *problem* ]]
 }
 
 @test "staleness: threshold is configurable and 0 disables it" {
@@ -465,8 +465,8 @@ load lib
     run_ingest
 
     [ "$status" -eq 0 ]
-    [[ "$(notifications)" == *"ok ytt ingest healthy"* ]]
-    [[ "$(notifications)" != *problem* ]]
+    [[ "$(reported)" == *"send ok ytt ingest healthy"* ]]
+    [[ "$(reported)" != *problem* ]]
 }
 
 @test "per-video ingest failures are alerted, not just logged" {
@@ -476,8 +476,8 @@ load lib
     run_ingest
 
     [ "$status" -eq 1 ]
-    [[ "$(notifications)" == *"problem ytt ingest unhealthy"* ]]
-    [[ "$(notifications)" == *"failed to ingest and stay pending"* ]]
+    [[ "$(reported)" == *"send problem ytt ingest unhealthy"* ]]
+    [[ "$(reported)" == *"failed to ingest and stay pending"* ]]
 }
 
 @test "a missing Claude CLI alerts before discovery" {
@@ -487,8 +487,8 @@ load lib
     run_ingest
 
     [ "$status" -eq 1 ]
-    [[ "$(notifications)" == *"problem ytt ingest aborted before discovery"* ]]
-    [[ "$(notifications)" == *"Claude CLI not found"* ]]
+    [[ "$(reported)" == *"send problem ytt ingest aborted before discovery"* ]]
+    [[ "$(reported)" == *"Claude CLI not found"* ]]
 }
 
 @test "network give-up alerts instead of dying into the log" {
@@ -499,8 +499,8 @@ load lib
     run_ingest
 
     [ "$status" -eq 1 ]
-    [[ "$(notifications)" == *"problem ytt ingest aborted before discovery"* ]]
-    [[ "$(notifications)" == *"network still unreachable"* ]]
+    [[ "$(reported)" == *"send problem ytt ingest aborted before discovery"* ]]
+    [[ "$(reported)" == *"network still unreachable"* ]]
 }
 
 # --- dry run ---------------------------------------------------------------
@@ -519,7 +519,7 @@ load lib
     # Nothing ingested, nothing recorded, nobody paged.
     [ ! -s "$ROOT/.processed" ]
     [ ! -d "$ROOT/DRY1-------" ]
-    [ -z "$(notifications)" ]
+    [ -z "$(reported)" ]
 }
 
 @test "--dry-run surfaces an orphaned config without touching alert state" {
@@ -532,6 +532,6 @@ load lib
 
     [ "$status" -eq 1 ]
     [[ "$output" == *"channels config MISSING"* ]]
-    [[ "$output" == *"dry run: would notify [problem]"* ]]
-    [ -z "$(notifications)" ]
+    [[ "$output" == *"dry run: would report [problem]"* ]]
+    [ -z "$(reported)" ]
 }

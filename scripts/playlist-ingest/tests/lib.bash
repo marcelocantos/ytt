@@ -24,11 +24,12 @@ setup() {
     export YOUTUBE_INGEST_NOTIFY_BANNER=0
     unset YOUTUBE_INGEST_SLACK_WEBHOOK
     export YOUTUBE_INGEST_SLACK_WEBHOOK_FILE="$BATS_TEST_TMPDIR/no-such-webhook"
-    # ingest.sh tests assert on WHAT gets alerted, not on how it's delivered:
-    # point them at a recorder. notify.bats exercises the real notify.sh.
-    NOTIFY_LOG="$BATS_TEST_TMPDIR/notifications"
-    export NOTIFY_LOG
-    export YOUTUBE_INGEST_NOTIFY_BIN="$MOCKS_DIR/notify-recorder"
+    # ytt reports events; blurter delivers them. These tests assert on WHAT ytt
+    # reports, using a mock blurter. Delivery, dedup and recovery behaviour are
+    # blurter's own test suite's responsibility — that separation is the point.
+    BLURTER_LOG="$BATS_TEST_TMPDIR/blurter-calls"
+    export BLURTER_LOG
+    export YOUTUBE_INGEST_BLURTER_BIN="$MOCKS_DIR/blurter"
 
     # Disable request pacing in tests — ingest-one's throttle otherwise sleeps
     # a random 3–7 min per fetch. MIN=MAX=0 ⇒ zero-length reservation, no sleep.
@@ -98,9 +99,9 @@ run_ingest_one() {
     run "$SCRIPT_DIR/ingest-one.sh" "$@"
 }
 
-# All notification records for this test (empty when nothing alerted).
-notifications() {
-    cat "$NOTIFY_LOG" 2>/dev/null || true
+# Everything ytt reported to blurter this test (empty when nothing was reported).
+reported() {
+    cat "$BLURTER_LOG" 2>/dev/null || true
 }
 
 # Backdate the liveness stamp so the staleness check trips. Args: <days-ago>.
