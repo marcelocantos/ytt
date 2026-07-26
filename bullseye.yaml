@@ -115,7 +115,7 @@ targets:
     achieved: 2026-07-26
   T12:
     name: The bundled ingest scripts run on a stock macOS /bin/bash (3.2), or declare their bash requirement
-    status: identified
+    status: achieved
     value: 0.0
     cost: 0.0
     acceptance:
@@ -125,6 +125,7 @@ targets:
     context: Found during the v0.10.0 release audit (2026-07-26). ingest.sh uses `mapfile` in 4 places, which is bash 4+; macOS has shipped bash 3.2.57 since Apple froze it at the last GPLv2 release. The bug is invisible on this machine because Homebrew's bash 5.x satisfies `#!/usr/bin/env bash`, and invisible in CI because the bats job runs on Ubuntu while the macOS release job only runs PyInstaller — so no oracle currently covers the combination that would fail. Pre-existing, not introduced by v0.10.0. notify.sh (added in v0.10.0) was checked and is 3.2-clean.
     origin: manual
     discovered: 2026-07-26
+    achieved: 2026-07-26
   T13:
     name: Alert delivery does not silently downgrade because of how the run was invoked
     status: achieved
