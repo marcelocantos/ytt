@@ -252,6 +252,10 @@ targets:
     - Run history (last attempt, last success, consecutive failures, backoff state) is queryable from crosshair's store
     - Ingest logs move out of the git-tracked content tree (no more auto-sync log-noise commits in ~/think)
     - The pipeline pins which ytt binary it invokes, eliminating the shell-vs-launchd binary identity skew
+    strategy:
+      command: /opt/homebrew/bin/ytt ingest
+      trigger: 'cron:30 20 * * *'
+      timeout: 12h
     context: Crosshair T2 (scheduled triggers) and T3 (safe process execution) were achieved on 2026-07-10, removing this target's external blocker. The migration uses a dedicated com.marcelocantos.ytt-crosshair LaunchAgent rather than modifying the shared Crosshair agent that owns yadm. Its versioned config scans this repository's bullseye.yaml every 30 seconds, with a dedicated ytt SQLite state DB and the existing pinned ingest environment. The strategy fires at 20:30 UTC daily—06:30 AEST / 07:30 AEDT—so it remains a single daily run across Melbourne daylight saving. After a dry-run and status-query verification, unload and delete com.marcelocantos.youtube-ingest.plist.
     origin: manual
     discovered: 2026-07-04
