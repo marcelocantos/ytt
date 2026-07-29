@@ -163,7 +163,8 @@ launchctl bootstrap "gui/$UID" \
 Crosshair persists the last attempt, success, failure count, and cooldown in
 `~/.local/state/crosshair/ytt.db`; inspect it with
 `crosshair status -c /path/to/bullseye.yaml --state ~/.local/state/crosshair/ytt.db`.
-It runs the installed `ytt ingest`, pins its dependencies, and writes logs to
+It runs the installed `ingest.sh` strategy, pins the `ytt` binary it uses for
+per-video work, and writes logs to
 `~/.local/var/log/youtube-ingest/` (not into the content tree). Edit the
 playlist URL and paths in the plist first; they are machine-specific. The
 scheduled path is deliberately network-tolerant: a tick that fires while the
