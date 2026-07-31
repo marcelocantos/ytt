@@ -30,30 +30,33 @@ jobs:
         with:
           ref: ${{ github.event.release.tag_name || inputs.tag }}
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-go@v6
         with:
-          python-version: "3.13"
+          go-version: "1.26"
 
-      - name: Verify tag matches __version__
+      - name: Verify tag matches main.version
         shell: bash
         run: |
           tag="${{ github.event.release.tag_name || inputs.tag }}"
           tag="${tag#v}"
-          pyver="$(python -c 'import re,pathlib; print(re.search(r"__version__ = \"([^\"]+)\"", pathlib.Path("ytt.py").read_text()).group(1))')"
-          echo "tag=$tag pyver=$pyver"
-          if [[ "$tag" != "$pyver" ]]; then
-            echo "::error::tag ($tag) != ytt.__version__ ($pyver)"
+          gover="$(grep -oE 'var version = "[^"]+"' main.go | grep -oE '"[^"]+"' | tr -d '\"')"
+          echo "tag=$tag goversion=$gover"
+          if [[ "$tag" != "$gover" ]]; then
+            echo "::error::tag ($tag) != main.version ($gover)"
             exit 1
           fi
 
-      - name: Install deps + PyInstaller
-        run: |
-          pip install pyinstaller .
-
       - name: Build binary
         shell: bash
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
-          pyinstaller --onedir --name ytt ytt.py
+          version="${TAG#v}"
+          mkdir -p dist/ytt
+          # CGO_ENABLED=0 gives a static binary and makes every target
+          # cross-compilable; ytt has no C dependencies.
+          CGO_ENABLED=0 go build -trimpath \
+            -ldflags "-s -w -X main.version=$version" -o dist/ytt/ytt .
           ./dist/ytt/ytt --version
 
       - name: Bundle playlist-ingest scripts
@@ -70,11 +73,12 @@ jobs:
         run: |
           version="${TAG#v}"
           name="ytt-${version}-${{ matrix.target }}"
-          # Tarball contents are the *contents* of dist/ytt — the `ytt`
-          # binary at the root, its `_internal` deps directory, and the
-          # bundled `scripts/` tree. The brew formula moves everything
-          # into libexec and symlinks the binary into bin (see
-          # homebrew-releaser `install:` below).
+          # Tarball contents are the *contents* of dist/ytt — the `ytt` binary
+          # at the root plus the bundled `scripts/` tree. There is no longer an
+          # `_internal` directory: the Go build is a single static binary, where
+          # the PyInstaller --onedir bundle needed its interpreter and deps
+          # shipped alongside. The formula still moves everything into libexec
+          # and symlinks the binary into bin.
           tar -C dist/ytt -czf "${name}.tar.gz" .
           shasum -a 256 "${name}.tar.gz"
 

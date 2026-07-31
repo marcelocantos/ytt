@@ -1,68 +1,39 @@
-name: CI
-
-on:
-  push:
-    branches: [master]
-  pull_request:
-    branches: [master]
-
 jobs:
-  smoke:
-    runs-on: ubuntu-latest
+  go:
+    name: Go ${{ matrix.os }}
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
-
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-go@v6
         with:
-          python-version: ${{ matrix.python-version }}
+          go-version: "1.26"
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - name: vet
+        run: go vet ./...
+      - name: test
+        run: go test ./... -count=1 -race
+      - name: build
+        run: go build -o ytt .
 
-      - name: Install
-        run: pip install -e ".[test]"
-
+      # The CLI contract from ~/.claude/conventions.md. These ran as a Python
+      # matrix before; the binary has no interpreter to matrix over, so they run
+      # once per OS instead.
       - name: --version
         run: |
-          out="$(ytt --version)"
-          echo "$out"
-          [[ "$out" == ytt* ]]
-
+          out="$(./ytt --version)"; echo "$out"; [[ "$out" == ytt* ]]
       - name: --help
-        run: ytt --help
-
+        run: ./ytt --help
       - name: --help-agent
         run: |
-          out="$(ytt --help-agent)"
-          echo "$out" | head -3
+          out="$(./ytt --help-agent)"
           [[ "$out" == *"ytt"* && "$out" == *"Exit codes"* ]]
-
       - name: no-args exits 2
         run: |
-          set +e
-          ytt
-          rc=$?
-          set -e
-          [[ $rc -eq 2 ]]
-
-      - name: pytest
-        run: pytest -q
-
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-      - name: Build sdist and wheel
-        run: |
-          pip install build
-          python -m build
-      - name: Check artefacts
-        run: |
-          pip install twine
-          twine check dist/*
+          set +e; ./ytt; rc=$?; set -e; [[ $rc -eq 2 ]]
 
   scripts:
     runs-on: ubuntu-latest

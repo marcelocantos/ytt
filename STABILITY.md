@@ -78,7 +78,7 @@ personal-vault-shaped and likely to move to something neutral
 
 | Path | Stability |
 |---|---|
-| `$ROOT/<video-id>/.transcript/transcript.json` (youtube-transcript-api payload, pretty-printed) | Needs review |
+| `$ROOT/<video-id>/.transcript/transcript.json` (yt-dlp payload, pretty-printed) | Needs review |
 | `$ROOT/<video-id>/meta.json` (yt-dlp JSON shape) | Needs review |
 | `$ROOT/<video-id>/<slug>.md` (synopsis) | Fluid |
 | `$ROOT/.processed` (one ID per line) | Stable |
