@@ -70,7 +70,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.BoolVar(&showVersion, "version", false, "print the version")
 	fs.BoolVar(&showVersion, "V", false, "print the version")
 	if err := fs.Parse(args); err != nil {
-		// flag already reported it; usage was printed by fs.Usage.
+		// The flag package reports -h/--help as ErrHelp. That is a successful
+		// request for usage, not a usage error: argparse exited 0 for it, and
+		// `ytt --help | less` must not look like a failure.
+		if errors.Is(err, flag.ErrHelp) {
+			fmt.Fprint(stdout, usage)
+			return 0
+		}
+		// Otherwise flag already reported it and fs.Usage printed usage.
 		return 2
 	}
 

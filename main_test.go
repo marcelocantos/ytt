@@ -334,3 +334,26 @@ func TestIngestScriptNotFoundIsExplicit(t *testing.T) {
 		t.Errorf("unexpected error text: %v", err)
 	}
 }
+
+// The Go flag package reports -h/--help as an error (ErrHelp). argparse exited
+// 0 for it, and `ytt --help | less` must not look like a failure — CI caught
+// this regression, so it gets a test.
+func TestHelpExitsZeroWithUsageOnStdout(t *testing.T) {
+	for _, arg := range []string{"--help", "-h"} {
+		var out, errb bytes.Buffer
+		if code := run([]string{arg}, &out, &errb); code != 0 {
+			t.Errorf("ytt %s exited %d, want 0", arg, code)
+		}
+		if !strings.Contains(out.String(), "usage: ytt") {
+			t.Errorf("ytt %s should print usage to stdout, got %q", arg, out.String())
+		}
+	}
+}
+
+func TestUnknownFlagExitsTwo(t *testing.T) {
+	// By contrast, a genuine usage error must still be exit 2.
+	var out, errb bytes.Buffer
+	if code := run([]string{"--nonsense"}, &out, &errb); code != 2 {
+		t.Errorf("exit = %d, want 2", code)
+	}
+}
