@@ -150,21 +150,26 @@ $YOUTUBE_INGEST_ROOT/
 
 ### Scheduling
 
-To run ingest on a daily schedule, install the bundled launchd agent:
+The bundled Crosshair strategy runs ingest once daily at 20:30 UTC (06:30
+AEST / 07:30 AEDT). Install its dedicated launchd executor:
 
 ```sh
-cp "$(brew --prefix)/libexec/scripts/playlist-ingest/launchd/com.marcelocantos.youtube-ingest.plist" \
+cp "$(brew --prefix)/libexec/scripts/playlist-ingest/launchd/com.marcelocantos.ytt-crosshair.plist" \
    ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.marcelocantos.youtube-ingest.plist
+launchctl bootstrap "gui/$UID" \
+   ~/Library/LaunchAgents/com.marcelocantos.ytt-crosshair.plist
 ```
 
-It runs the installed `ytt ingest` at 06:30 daily, pins the `ytt`
-binary, and writes logs to `~/.local/var/log/youtube-ingest/` (not into
-the content tree). Edit the playlist URL and paths in the plist first;
-they are machine-specific. The scheduled path is deliberately
-network-tolerant: a tick that fires while the machine is asleep or
-between networks waits for connectivity rather than recording a false
-"nothing new".
+Crosshair persists the last attempt, success, failure count, and cooldown in
+`~/.local/state/crosshair/ytt.db`; inspect it with
+`crosshair status -c /path/to/bullseye.yaml --state ~/.local/state/crosshair/ytt.db`.
+It runs the installed `ingest.sh` strategy, pins the `ytt` binary it uses for
+per-video work, and writes logs to
+`~/.local/var/log/youtube-ingest/` (not into the content tree). Edit the
+playlist URL and paths in the plist first; they are machine-specific. The
+scheduled path is deliberately network-tolerant: a tick that fires while the
+machine is asleep or between networks waits for connectivity rather than
+recording a false "nothing new".
 
 ### Tracking channels (optional)
 

@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Dedicated Crosshair executor for ytt's nightly ingest strategy.
+
+  Install with:
+
+    cp scripts/playlist-ingest/launchd/com.marcelocantos.ytt-crosshair.plist \
+       ~/Library/LaunchAgents/
+    launchctl bootstrap "gui/$UID" \
+       ~/Library/LaunchAgents/com.marcelocantos.ytt-crosshair.plist
+
+  This agent owns only ytt's bullseye.yaml and state DB. Keep it separate
+  from any Crosshair agent that manages unrelated repositories: each target's
+  strategy and its scheduling environment remain versioned beside that target.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.marcelocantos.ytt-crosshair</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/crosshair</string>
+        <string>run</string>
+        <string>--config</string>
+        <string>/Users/marcelo/work/github.com/marcelocantos/ytt/bullseye.yaml</string>
+        <string>--state</string>
+        <string>/Users/marcelo/.local/state/crosshair/ytt.db</string>
+        <string>--tick</string>
+        <string>30s</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/marcelo/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>RUST_LOG</key>
+        <string>info</string>
+        <key>YOUTUBE_INGEST_PLAYLIST</key>
+        <string>https://www.youtube.com/playlist?list=PLDVkHXSf0IIdu_-EN_z0lda-LE_J2VRk8</string>
+        <key>YOUTUBE_INGEST_YTT_BIN</key>
+        <string>/opt/homebrew/bin/ytt</string>
+        <key>YOUTUBE_INGEST_CLAUDE_BIN</key>
+        <string>/Users/marcelo/.local/bin/claude</string>
+        <key>YOUTUBE_CHANNELS_FILE</key>
+        <string>/Users/marcelo/.config/ytt/channels.yaml</string>
+        <key>YOUTUBE_INGEST_BLURTER_BIN</key>
+        <string>/opt/homebrew/bin/blurter</string>
+        <key>YOUTUBE_INGEST_LOG</key>
+        <string>/Users/marcelo/.local/var/log/youtube-ingest/ingest.log</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>WorkingDirectory</key>
+    <string>/Users/marcelo</string>
+    <key>StandardOutPath</key>
+    <string>/Users/marcelo/.local/var/log/ytt-crosshair.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/marcelo/.local/var/log/ytt-crosshair.log</string>
+</dict>
+</plist>
