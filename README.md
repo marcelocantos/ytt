@@ -2,7 +2,7 @@
 
 Fetch YouTube video transcripts from the command line.
 
-A thin wrapper around [`youtube-transcript-api`](https://github.com/jdepoix/youtube-transcript-api)
+A thin wrapper around [`yt-dlp`](https://github.com/jdepoix/yt-dlp)
 that extracts video IDs from URLs, handles multiple videos, and optionally
 prefixes each segment with a timestamp.
 
@@ -123,7 +123,7 @@ ytt ingest
 ```
 $YOUTUBE_INGEST_ROOT/
 ├── <video-id>/
-│   ├── .transcript/transcript.json # full youtube-transcript-api payload (hidden from Obsidian graph)
+│   ├── .transcript/transcript.json # full yt-dlp payload (hidden from Obsidian graph)
 │   ├── meta.json                   # title, channel, upload date, duration, …
 │   └── <slug>.md                   # synopsis (generated via `claude`)
 ├── .processed                      # dedup state (one video ID per line)

@@ -1,30 +1,15 @@
-# Build artifacts
-build/
-dist/
-*.egg-info/
-*.egg
+# Build artefacts.
+/ytt
+/dist/
 
-# Python bytecode
-__pycache__/
-*.py[cod]
-*$py.class
+# Go
+*.test
 
-# Virtualenvs
-.venv*/
-venv/
-
-# Caches
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-
-# PyInstaller
-*.spec
-
-# Editor/OS
+# Editor and OS noise.
 .vscode/
 .idea/
 .DS_Store
 
-# Personal playlist-ingest config (use channels.example.yaml as a template)
+# Local channel config stays out of the repo: it is personal, and resolving
+# config from the install prefix is what caused a fifteen-day silent outage.
 scripts/playlist-ingest/channels.yaml
