@@ -16,7 +16,7 @@ make_video() {
 }
 
 run_build() {
-    run "$SCRIPT_DIR/build-index.sh"
+    run "$YTT_GO_BIN" build-index
 }
 
 @test "TL;DR line is extracted into the index" {

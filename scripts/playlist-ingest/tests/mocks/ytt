@@ -4,6 +4,13 @@
 
 set -e
 
+# `build-index` is a real subcommand with no network access, so forward it to
+# the actual binary rather than faking it: the ingest tests assert on the index
+# file it writes, and a stub would make those assertions meaningless.
+if [[ "${1:-}" == "build-index" ]]; then
+    exec "${YTT_GO_BIN:?ytt mock needs YTT_GO_BIN}" "$@"
+fi
+
 # ingest-one invokes `ytt --json <URL>`; pick the URL out by scheme so flag
 # order doesn't matter.
 URL=""

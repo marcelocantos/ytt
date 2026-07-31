@@ -9,6 +9,18 @@ setup() {
     TESTS_DIR="$SCRIPT_DIR/tests"
     MOCKS_DIR="$TESTS_DIR/mocks"
 
+    # Parts of the pipeline are now subcommands of the Go binary. Point the
+    # tests at the built binary and fail loudly if it is absent: silently
+    # skipping would let these tests pass while exercising nothing.
+    REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+    YTT_GO_BIN="$REPO_ROOT/ytt"
+    export YTT_GO_BIN
+    if [[ ! -x "$YTT_GO_BIN" ]]; then
+        printf 'lib.bash: %s missing or not executable; run `make build` first\n' \
+            "$YTT_GO_BIN" >&2
+        return 1
+    fi
+
     ROOT="$BATS_TEST_TMPDIR/youtube"
     mkdir -p "$ROOT"
 

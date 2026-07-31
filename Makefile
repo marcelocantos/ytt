@@ -16,7 +16,9 @@ test: test-go test-scripts
 test-go:
 	go test ./... -count=1 -race
 
-test-scripts:
+# Depends on build: parts of the pipeline are Go subcommands, and a stale
+# binary would silently test the wrong thing.
+test-scripts: build
 	bats scripts/playlist-ingest/tests/
 
 vet:

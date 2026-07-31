@@ -669,7 +669,7 @@ fi
 # this the per-video files exist but the user-facing summary page stays
 # frozen — exactly the symptom that prompted this design pass.
 if (( INGESTED > 0 )); then
-    if "$HERE/build-index.sh" >>"$LOG" 2>&1; then
+    if "$YTT_BIN" build-index >>"$LOG" 2>&1; then
         log "index refreshed"
     else
         log "index refresh failed (see $LOG)"

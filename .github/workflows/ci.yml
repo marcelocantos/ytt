@@ -47,13 +47,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+      # Parts of the pipeline are Go subcommands now, and lib.bash fails loudly
+      # if the binary is absent rather than skipping the tests.
+      - name: Build ytt
+        run: go build -o ytt .
       - name: Install bats
         run: sudo apt-get update && sudo apt-get install -y bats
       - name: Syntax-check shell scripts
         run: |
-          bash -n scripts/playlist-ingest/ingest.sh
-          bash -n scripts/playlist-ingest/ingest-one.sh
-          bash -n scripts/playlist-ingest/build-index.sh
+          for f in scripts/playlist-ingest/*.sh; do bash -n "$f"; done
       - name: Run bats tests
         run: bats scripts/playlist-ingest/tests/
 
@@ -73,6 +78,11 @@ jobs:
       # fires — the test for it fails, which is the correct outcome: a macOS box
       # lacking coreutils genuinely has no watchdog. The formula declares
       # coreutils for the same reason.
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+      - name: Build ytt
+        run: go build -o ytt .
       - name: Install bats and coreutils
         run: brew install bats-core coreutils
       - name: Confirm /bin/bash really is 3.2
