@@ -33,6 +33,20 @@ load lib
     [ -d "$ROOT/VID101-----" ]
 }
 
+@test "orphan sweep: dry run reports the orphan but does not delete its dir" {
+    mkdir -p "$ROOT/VID102-----/.transcript"
+    : > "$ROOT/VID102-----/meta.json"
+    set_playlist "VID102-----"
+
+    run_ingest --dry-run
+
+    [[ "$output" == *"orphan dirs from failed prior runs (queued for retry): VID102-----"* ]]
+    [ -f "$ROOT/VID102-----/meta.json" ]
+    # Not ingested and not marked processed — a dry run only reports.
+    [ ! -f "$ROOT/VID102-----/mock-synopsis-VID102-----.md" ]
+    ! grep -Fxq -- "VID102-----" "$ROOT/.processed"
+}
+
 @test "stale cursor (not in .processed): walk proceeds past it; videos recovered" {
     channels_with "@stalechan"
     set_channel stalechan VIDA------- VIDB------- VIDC------- VIDD-------

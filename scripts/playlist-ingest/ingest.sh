@@ -289,13 +289,16 @@ DISCOVERY_FAILURES=0
 # without being in .processed was killed mid-run, had its synopsis step
 # fail, or otherwise crashed before ingest-one.sh could record success.
 # Wipe the half-built dir and queue the ID for a fresh attempt below.
+# A dry run must not mutate the content tree (2026-08-16: a dry run wiped
+# a same-day manual /ytt ingest that had not yet been recorded in
+# .processed), so it only reports what it would wipe.
 shopt -s nullglob
 ORPHAN_NEW=()
 for dir in "$ROOT"/*/; do
     id="$(basename "$dir")"
     grep -Fxq -- "$id" "$STATE" && continue
     ORPHAN_NEW+=("$id")
-    rm -rf "$dir"
+    $DRY_RUN || rm -rf "$dir"
 done
 shopt -u nullglob
 
