@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
-# Tests for build-index.sh: TL;DR extraction, legacy fallback, pipe escaping,
-# and newest-first date sorting.
+# Tests for `ytt build-index`: TL;DR extraction, legacy fallback, pipe
+# escaping, and newest-first date sorting.
 
 load lib
 

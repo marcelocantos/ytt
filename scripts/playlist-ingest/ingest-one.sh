@@ -200,7 +200,7 @@ TITLE=$(jq -r '.title // "(unknown)"' "$DIR/meta.json" 2>/dev/null || echo "(unk
 # script (bundled into libexec alongside it by the brew formula). Read it and
 # append it verbatim so the scheduled path and the interactive /ytt skill — the
 # other consumer of that file — can never drift from each other or from the
-# build-index.sh parser.
+# `ytt build-index` parser.
 CONTRACT_FILE="$(cd "$(dirname "$0")" && pwd)/synopsis-contract.md"
 if [[ ! -f "$CONTRACT_FILE" ]]; then
     log "synopsis contract not found at $CONTRACT_FILE; cleaning up"

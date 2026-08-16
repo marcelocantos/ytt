@@ -7,10 +7,10 @@
                      `claude -p` synopsis prompt (the scheduled path).
     - the /ytt skill instructs the interactive agent to read this file
                      before composing a synopsis (the manual path).
-    - build-index.sh parses the artifacts this format produces; its
-                     expectations are pinned in the "Machine contract"
-                     section below so a format change and a parser change
-                     land in the same diff.
+    - `ytt build-index` (index.go) parses the artifacts this format
+                     produces; its expectations are pinned in the
+                     "Machine contract" section below so a format change
+                     and a parser change land in the same diff.
 
   Edit the format in ONE place: here.
 -->
@@ -57,12 +57,12 @@ The file is named `<slug>.md`, one synopsis file per video directory:
 - Favour the substantive topic over personalities/sensationalism.
 - Must NOT begin with `transcript` (reserved for the raw transcript).
 
-## Machine contract (do not drift without updating build-index.sh)
+## Machine contract (do not drift without updating `ytt build-index`)
 
 - The TL;DR line is prefixed **exactly** with `**TL;DR**: ` and lives on
-  a single line. `build-index.sh` extracts it with
-  `grep -m1 -E '^\*\*TL;DR\*\*:'`; a missing line falls back to the first
-  sentence of the `## Synopsis` section.
+  a single line. `ytt build-index` extracts the first such line; a
+  missing line falls back to the first sentence of the `## Synopsis`
+  section.
 - The synopsis file is the single `*.md` in the video directory whose
-  name does not start with `transcript`. `build-index.sh` and
+  name does not start with `transcript`. `ytt build-index` and
   `ingest-one.sh` both locate it that way.
