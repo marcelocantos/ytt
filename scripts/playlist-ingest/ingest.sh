@@ -15,6 +15,11 @@
 #   2. The channels listed in the resolved channels file — $YOUTUBE_CHANNELS_FILE
 #      if set, else $XDG_CONFIG_HOME/ytt/channels.yaml (i.e. normally
 #      ~/.config/ytt/channels.yaml), else the copy beside this script.
+#   3. A persistent extra-ID file ($YOUTUBE_INGEST_QUEUE, default
+#      $STATE_DIR/backfill.ids). One video ID per line; comments (#) and
+#      blanks skipped. Deduped against .processed each run, so this is the
+#      backfill hopper: drop IDs here and the existing paced workers drain
+#      them. The file is not rewritten — .processed is the drain cursor.
 #
 # Config location: the channels file must NOT be resolved from the install
 # directory alone. This script is installed into a versioned, package-managed
@@ -40,6 +45,7 @@
 # proceeds past it, bounded by a safety limit.
 #
 # Concurrency: $YOUTUBE_INGEST_CONCURRENCY (default 4).
+# Queue file:  $YOUTUBE_INGEST_QUEUE    (default $STATE_DIR/backfill.ids)
 # Output:      $YOUTUBE_INGEST_ROOT     (default ~/think/knowledge/youtube)
 # Network:     the run waits for connectivity before discovery — the daily
 #              launchd tick usually fires in a DarkWake maintenance window
@@ -317,6 +323,23 @@ for ID in ${PLAYLIST_IDS[@]+"${PLAYLIST_IDS[@]}"}; do
 done
 log "playlist=${#PLAYLIST_IDS[@]} pending=${#PLAYLIST_NEW[@]}"
 
+# Persistent extra-ID hopper (Takeout backfill, one-shot dumps). Same
+# contract as the playlist: re-read every run, skip anything already in
+# .processed. Missing file ⇒ source not enabled, not an error.
+QUEUE="${YOUTUBE_INGEST_QUEUE:-$STATE_DIR/backfill.ids}"
+QUEUE_NEW=()
+if [[ -f "$QUEUE" ]]; then
+    while IFS= read -r _line || [[ -n "$_line" ]]; do
+        _line="${_line%%#*}"
+        _line="${_line#"${_line%%[![:space:]]*}"}"
+        _line="${_line%"${_line##*[![:space:]]}"}"
+        [[ -n "$_line" ]] || continue
+        grep -Fxq -- "$_line" "$STATE" && continue
+        QUEUE_NEW+=("$_line")
+    done < "$QUEUE"
+    log "queue=$QUEUE pending=${#QUEUE_NEW[@]}"
+fi
+
 # Collect new IDs from each tracked channel.
 #   Bootstrap (no cursor): take the latest upload. If already in .processed,
 #     adopt it as the cursor immediately. Otherwise queue it and DEFER the
@@ -336,7 +359,14 @@ if [[ -f "$CHANNELS_FILE" ]]; then
     for handle in ${HANDLES[@]+"${HANDLES[@]}"}; do
         handle="${handle#@}"
         [[ -n "$handle" ]] || continue
-        url="https://www.youtube.com/@${handle}/videos"
+        # Takeout (and the Data API) identify channels by UC… id, not
+        # @handle. Resolving thousands of handles would be its own YouTube
+        # burst; accept the id as the handle and hit /channel/UC…/videos.
+        if [[ "$handle" =~ ^UC[A-Za-z0-9_-]{22}$ ]]; then
+            url="https://www.youtube.com/channel/${handle}/videos"
+        else
+            url="https://www.youtube.com/@${handle}/videos"
+        fi
         marker="$CHANNELS_DIR/$handle"
         discovered="$CHANNELS_DIR/$handle.discovered"
 
@@ -466,6 +496,12 @@ if (( ${#PLAYLIST_NEW[@]} > 0 )); then
     printf '%s\n' "${PLAYLIST_NEW[@]}" > "$PLAYLIST_PENDING"
     SOURCE_FILES+=("$PLAYLIST_PENDING")
 fi
+QUEUE_PENDING=""
+if (( ${#QUEUE_NEW[@]} > 0 )); then
+    QUEUE_PENDING="$(mktemp)"
+    printf '%s\n' "${QUEUE_NEW[@]}" > "$QUEUE_PENDING"
+    SOURCE_FILES+=("$QUEUE_PENDING")
+fi
 shopt -s nullglob
 SOURCE_FILES+=("$CHANNELS_DIR"/*.discovered)
 shopt -u nullglob
@@ -500,6 +536,7 @@ while IFS= read -r _line || [[ -n "$_line" ]]; do
 done < "$QUEUE_FILE"
 rm -f "$QUEUE_FILE"
 if [[ -n "$PLAYLIST_PENDING" ]]; then rm -f "$PLAYLIST_PENDING"; fi
+if [[ -n "$QUEUE_PENDING" ]]; then rm -f "$QUEUE_PENDING"; fi
 
 # Defense-in-depth: a YouTube video ID is exactly 11 chars of [A-Za-z0-9_-].
 # Anything else in the queue means a source fed us junk (the --help incident

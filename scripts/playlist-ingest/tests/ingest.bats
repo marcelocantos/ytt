@@ -398,6 +398,57 @@ load lib
     ! grep -Fxq -- "XDGVID1----" "$ROOT/.processed"
 }
 
+@test "extra-id queue: pending IDs are ingested through the paced workers" {
+    set_playlist ""
+    export YOUTUBE_INGEST_QUEUE="$BATS_TEST_TMPDIR/backfill.ids"
+    printf '%s\n' "QID100-----" "# comment" "QID101-----" "" > "$YOUTUBE_INGEST_QUEUE"
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"queue=$YOUTUBE_INGEST_QUEUE pending=2"* ]]
+    grep -Fxq -- "QID100-----" "$ROOT/.processed"
+    grep -Fxq -- "QID101-----" "$ROOT/.processed"
+}
+
+@test "extra-id queue: already-processed IDs are skipped" {
+    set_playlist ""
+    mark_processed "QID200-----"
+    export YOUTUBE_INGEST_QUEUE="$BATS_TEST_TMPDIR/backfill.ids"
+    printf '%s\n' "QID200-----" "QID201-----" > "$YOUTUBE_INGEST_QUEUE"
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"pending=1"* ]]
+    grep -Fxq -- "QID201-----" "$ROOT/.processed"
+}
+
+@test "extra-id queue: junk lines are dropped rather than dispatched" {
+    set_playlist ""
+    export YOUTUBE_INGEST_QUEUE="$BATS_TEST_TMPDIR/backfill.ids"
+    printf '%s\n' "not-an-id" "QID300-----" "Options:" > "$YOUTUBE_INGEST_QUEUE"
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"dropping junk id from queue: not-an-id"* ]]
+    [[ "$output" == *"dropping junk id from queue: Options:"* ]]
+    grep -Fxq -- "QID300-----" "$ROOT/.processed"
+}
+
+@test "UC-id channel handle walks /channel/UC…/videos" {
+    channels_with "UCabcdefghijklmnopqrstuv"
+    set_channel UCabcdefghijklmnopqrstuv UCVID1-----
+    set_playlist ""
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    grep -Fxq -- "UCVID1-----" "$ROOT/.processed"
+    [ -f "$ROOT/.channels/UCabcdefghijklmnopqrstuv" ]
+}
+
 # --- staleness backstop: success that produces nothing, forever -------------
 
 @test "staleness: tracked channels producing nothing for too long is unhealthy" {

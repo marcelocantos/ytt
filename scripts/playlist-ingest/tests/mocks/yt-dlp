@@ -40,9 +40,13 @@ done
 # Simpler: detect mode from the URL pattern + presence of --playlist-end.
 
 handle_for() {
-    # Extract handle from a YouTube channel URL like
-    # https://www.youtube.com/@<handle>/videos
-    sed -E 's#.*@([^/]+)/videos.*#\1#' <<<"$1"
+    # Extract handle from https://www.youtube.com/@<handle>/videos or
+    # channel id from https://www.youtube.com/channel/<UCid>/videos
+    if [[ "$1" == *"/channel/"* ]]; then
+        sed -E 's#.*/channel/([^/]+)/videos.*#\1#' <<<"$1"
+    else
+        sed -E 's#.*@([^/]+)/videos.*#\1#' <<<"$1"
+    fi
 }
 
 if [[ "$URL" == *playlist?list=* || "$URL" == *playlist*list=* ]]; then
@@ -54,7 +58,7 @@ if [[ "$URL" == *playlist?list=* || "$URL" == *playlist*list=* ]]; then
     for id in ${MOCK_YT_DLP_PLAYLIST_IDS:-}; do
         printf '%s\n' "$id"
     done
-elif [[ "$URL" == *@*/videos* ]]; then
+elif [[ "$URL" == *@*/videos* || "$URL" == */channel/*/videos* ]]; then
     # Channel feed.
     handle="$(handle_for "$URL")"
     if [[ ",${MOCK_YT_DLP_CHANNEL_FAIL:-}," == *",$handle,"* ]]; then

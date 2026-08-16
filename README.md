@@ -146,6 +146,7 @@ $YOUTUBE_INGEST_ROOT/
 | `YOUTUBE_INGEST_NETWORK_WAIT` | `14400` | Seconds to wait (awake-time) for connectivity before giving up — covers launchd ticks that fire in a no-network DarkWake window. |
 | `YOUTUBE_INGEST_STALE_DAYS` | `7` | Days of zero ingests (with channels tracked) before the run is judged unhealthy. `0` disables the check. |
 | `YOUTUBE_INGEST_STATE_DIR` | `~/.local/state/ytt` | Where the liveness stamp lives. Kept out of the content tree. |
+| `YOUTUBE_INGEST_QUEUE` | `$YOUTUBE_INGEST_STATE_DIR/backfill.ids` | Optional extra video-ID hopper (one ID per line). Deduped against `.processed` each run and drained by the same paced workers as the playlist. |
 | `YOUTUBE_INGEST_BLURTER_BIN` | `blurter` (PATH) | The blurter binary used to report events. Pin it in scheduled runs. |
 
 ### Scheduling

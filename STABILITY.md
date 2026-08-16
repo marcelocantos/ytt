@@ -65,6 +65,7 @@ settle (see **Playlist-ingest workflow** below).
 | `YOUTUBE_CHANNELS_FILE` | `$XDG_CONFIG_HOME/ytt/channels.yaml` | Needs review |
 | `YOUTUBE_INGEST_STALE_DAYS` | `7` | Needs review |
 | `YOUTUBE_INGEST_STATE_DIR` | `$XDG_STATE_HOME/ytt` | Needs review |
+| `YOUTUBE_INGEST_QUEUE` | `$YOUTUBE_INGEST_STATE_DIR/backfill.ids` | Needs review |
 | `YOUTUBE_INGEST_BLURTER_BIN` | `blurter` (PATH) | Needs review |
 | `YOUTUBE_INGEST_CONCURRENCY` | `4` | Stable |
 | `YOUTUBE_INGEST_YTT_BIN` | `ytt` (PATH) | Stable |
@@ -99,6 +100,10 @@ channels:
   - handle: <youtube-handle>          # required, with or without leading "@"
     name: <display-name>              # optional, cosmetic
 ```
+
+A 24-character `UC…` channel id is also accepted as `handle` and is
+fetched via `/channel/UC…/videos` (so a Takeout dump does not need a
+handle-resolution pass).
 
 Stability: Needs review. The handle/name pair is the minimum viable
 schema; per-channel options (filters, ingest cadence, alternative
