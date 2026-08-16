@@ -53,6 +53,8 @@ const missing = "–" // en dash, as the shell implementation emitted
 
 var tldrRe = regexp.MustCompile(`^\*\*TL;DR\*\*:[[:space:]]*`)
 
+var caveatRe = regexp.MustCompile(`^\*\*Caveat\*\*:[[:space:]]*`)
+
 // sentenceEnd trims a fallback line to its first sentence.
 var sentenceEnd = regexp.MustCompile(`([.!?]).*`)
 
@@ -132,17 +134,21 @@ func collectRows(root string) ([]indexRow, error) {
 		}
 
 		meta := readMeta(filepath.Join(dir, "meta.json"), id)
-		tldr := extractTLDR(synopsis)
+		tldr, caveat := extractTLDR(synopsis)
 
 		url := meta.WebpageURL
 		if url == "" {
 			url = "https://www.youtube.com/watch?v=" + id
 		}
+		cell := escapePipes(tldr)
+		if caveat != "" {
+			cell += "<br>👎 " + escapePipes(caveat)
+		}
 		row := fmt.Sprintf("| **[%s](%s/%s)** ([yt](%s))<br>%s<br>%s · %s | %s |",
 			escapePipes(meta.Title), id, slug, url,
 			escapePipes(channelOf(meta)),
 			formatDate(meta.UploadDate), formatDuration(meta),
-			escapePipes(tldr))
+			cell)
 
 		key := meta.UploadDate
 		if key == "" {
@@ -258,11 +264,12 @@ func escapePipes(s string) string {
 
 // extractTLDR pulls the summary out of a synopsis: the first **TL;DR**: line,
 // else the first non-empty line of the Synopsis section trimmed to one
-// sentence (legacy entries predate the TL;DR convention).
-func extractTLDR(path string) string {
+// sentence (legacy entries predate the TL;DR convention). It also returns the
+// first **Caveat**: line, or "" when the synopsis has none.
+func extractTLDR(path string) (tldr, caveat string) {
 	f, err := os.Open(path)
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	defer f.Close()
 
@@ -272,12 +279,20 @@ func extractTLDR(path string) string {
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if tldrRe.MatchString(line) {
-			// A TL;DR anywhere wins outright; return immediately.
-			return tldrRe.ReplaceAllString(line, "")
+		if tldr == "" && tldrRe.MatchString(line) {
+			// The first TL;DR wins outright over any fallback.
+			tldr = tldrRe.ReplaceAllString(line, "")
+			continue
+		}
+		if caveat == "" && caveatRe.MatchString(line) {
+			caveat = caveatRe.ReplaceAllString(line, "")
+			continue
+		}
+		if tldr != "" && caveat != "" {
+			return tldr, caveat
 		}
 		if fallback != "" {
-			continue // keep scanning for a TL;DR, but the fallback is settled
+			continue // keep scanning for TL;DR/Caveat; the fallback is settled
 		}
 		switch {
 		case strings.HasPrefix(line, "## Synopsis"):
@@ -288,5 +303,8 @@ func extractTLDR(path string) string {
 			fallback = sentenceEnd.ReplaceAllString(line, "$1")
 		}
 	}
-	return fallback
+	if tldr == "" {
+		tldr = fallback
+	}
+	return tldr, caveat
 }

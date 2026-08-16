@@ -34,8 +34,39 @@ func TestExtractTLDRPrefersTLDRLine(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "s.md")
 	os.WriteFile(path, []byte("# T\n**TL;DR**: The summary.\n\n## Synopsis\nBody text.\n"), 0o644)
-	if got := extractTLDR(path); got != "The summary." {
+	got, caveat := extractTLDR(path)
+	if got != "The summary." {
 		t.Errorf("got %q", got)
+	}
+	if caveat != "" {
+		t.Errorf("caveat = %q, want empty when no Caveat line", caveat)
+	}
+}
+
+func TestExtractTLDRReturnsCaveat(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.md")
+	os.WriteFile(path, []byte("# T\n**TL;DR**: The summary.\n\n**Caveat**: Founder marketing.\n\n## Synopsis\nBody.\n"), 0o644)
+	got, caveat := extractTLDR(path)
+	if got != "The summary." {
+		t.Errorf("tldr = %q", got)
+	}
+	if caveat != "Founder marketing." {
+		t.Errorf("caveat = %q", caveat)
+	}
+}
+
+func TestExtractTLDRCaveatWithFallbackSummary(t *testing.T) {
+	// A legacy entry without a TL;DR line can still carry a Caveat.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.md")
+	os.WriteFile(path, []byte("# T\n\n**Caveat**: Sponsored.\n\n## Synopsis\nFirst stands in. Rest dropped.\n"), 0o644)
+	got, caveat := extractTLDR(path)
+	if got != "First stands in." {
+		t.Errorf("tldr = %q", got)
+	}
+	if caveat != "Sponsored." {
+		t.Errorf("caveat = %q", caveat)
 	}
 }
 
@@ -43,7 +74,7 @@ func TestExtractTLDRFallsBackToFirstSentence(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "s.md")
 	os.WriteFile(path, []byte("# T\n\n## Synopsis\nFirst stands in. Second is dropped.\n"), 0o644)
-	if got := extractTLDR(path); got != "First stands in." {
+	if got, _ := extractTLDR(path); got != "First stands in." {
 		t.Errorf("got %q, want the first sentence only", got)
 	}
 }
@@ -54,7 +85,7 @@ func TestExtractTLDRStopsAtNextSection(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "s.md")
 	os.WriteFile(path, []byte("## Synopsis\n\n## Key Takeaways\nNot this.\n"), 0o644)
-	if got := extractTLDR(path); got != "" {
+	if got, _ := extractTLDR(path); got != "" {
 		t.Errorf("got %q, want empty", got)
 	}
 }

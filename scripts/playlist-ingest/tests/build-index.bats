@@ -32,6 +32,22 @@ Body text here."
     grep -Fq "(AAAAAAAAAAA/first.md)" "$ROOT/youtube-knowledge-base.md"
 }
 
+@test "Caveat line renders under the TL;DR with a thumbs-down marker" {
+    make_video FFFFFFFFFFF 20260101 "Caveated" caveated.md \
+        "# Caveated
+
+**TL;DR**: The pitch.
+
+**Caveat**: Founder marketing; central claim contested.
+
+## Synopsis
+Body."
+    run_build
+    [ "$status" -eq 0 ]
+    grep -Fq '| The pitch.<br>👎 Founder marketing; central claim contested. |' \
+        "$ROOT/youtube-knowledge-base.md"
+}
+
 @test "legacy entry without TL;DR falls back to first synopsis sentence" {
     make_video BBBBBBBBBBB 20260101 "Legacy" legacy.md \
         "# Legacy
