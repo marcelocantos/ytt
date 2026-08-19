@@ -197,6 +197,25 @@ load lib
     [ ! -f "$ROOT/.channels/failchan" ]
 }
 
+@test "ytt without build-index aborts before discovery" {
+    set_playlist "NOINDEX----"
+    old_ytt="$BATS_TEST_TMPDIR/old-ytt"
+    cat > "$old_ytt" <<'EOF'
+#!/usr/bin/env bash
+# Stand-in for Homebrew 0.11.0: argparse help, no build-index subcommand.
+echo "usage: ytt [-h] [-t | --json] [VIDEO ...]"
+exit 0
+EOF
+    chmod +x "$old_ytt"
+    export YOUTUBE_INGEST_YTT_BIN="$old_ytt"
+
+    run_ingest
+
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"does not implement build-index"* ]]
+    [ ! -e "$ROOT/NOINDEX----" ]
+}
+
 @test "missing Claude CLI aborts before discovery or per-video writes" {
     set_playlist "CLAUDEMISS-"
     export YOUTUBE_INGEST_CLAUDE_BIN="$BATS_TEST_TMPDIR/missing-claude"

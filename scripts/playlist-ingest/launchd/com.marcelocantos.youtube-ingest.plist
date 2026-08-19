@@ -8,10 +8,13 @@
     launchctl load  ~/Library/LaunchAgents/com.marcelocantos.youtube-ingest.plist
 
   Design notes:
-  - Runs the INSTALLED binary (`/opt/homebrew/bin/ytt ingest`), never a working
-    checkout, and pins YOUTUBE_INGEST_YTT_BIN plus YOUTUBE_INGEST_CLAUDE_BIN to
-    absolute paths. launchd therefore cannot resolve a different build—or fail
-    because its intentionally minimal PATH omits Claude Code's install directory.
+  - Pins ProgramArguments and YOUTUBE_INGEST_YTT_BIN to the Go ytt at
+    ~/.local/bin/ytt (a symlink onto the checkout binary). Homebrew 0.11.0 is
+    still the Python CLI and has no `build-index` subcommand: pointing the
+    scheduler at /opt/homebrew/bin/ytt made every successful pass log
+    `ytt: build-index: VideoUnavailable` and UNHEALTHY (2026-08-16 → 08-19).
+    YOUTUBE_INGEST_CLAUDE_BIN is also an absolute path so launchd's minimal
+    PATH cannot miss Claude Code.
   - YOUTUBE_CHANNELS_FILE is pinned to ~/.config/ytt/channels.yaml — OUTSIDE
     the install prefix. Pinning the binary above (2026-07-10) moved the script's
     idea of "beside me" into /opt/homebrew/Cellar/ytt/<version>/libexec/, which
@@ -41,7 +44,7 @@
     <string>com.marcelocantos.youtube-ingest</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/opt/homebrew/bin/ytt</string>
+        <string>/Users/marcelo/.local/bin/ytt</string>
         <string>ingest</string>
     </array>
     <key>EnvironmentVariables</key>
@@ -51,7 +54,7 @@
         <key>YOUTUBE_INGEST_PLAYLIST</key>
         <string>https://www.youtube.com/playlist?list=PLDVkHXSf0IIdu_-EN_z0lda-LE_J2VRk8</string>
         <key>YOUTUBE_INGEST_YTT_BIN</key>
-        <string>/opt/homebrew/bin/ytt</string>
+        <string>/Users/marcelo/.local/bin/ytt</string>
         <key>YOUTUBE_INGEST_CLAUDE_BIN</key>
         <string>/Users/marcelo/.local/bin/claude</string>
         <key>YOUTUBE_CHANNELS_FILE</key>

@@ -4,6 +4,15 @@
 
 set -e
 
+# ingest.sh preflights that `ytt --help` advertises build-index, so the
+# scheduled runner cannot pin a binary that will treat the token as a video
+# ID. Advertise the subcommand here; the real implementation is forwarded
+# below.
+if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
+    printf 'ytt build-index    regenerate the knowledge-base index\n'
+    exit 0
+fi
+
 # `build-index` is a real subcommand with no network access, so forward it to
 # the actual binary rather than faking it: the ingest tests assert on the index
 # file it writes, and a stub would make those assertions meaningless.

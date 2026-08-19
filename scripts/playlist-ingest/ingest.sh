@@ -208,6 +208,15 @@ YTT_BIN="${YOUTUBE_INGEST_YTT_BIN:-ytt}"
 if ! YTT_BIN="$(command -v "$YTT_BIN")"; then
     die "ytt executable not found: ${YOUTUBE_INGEST_YTT_BIN:-ytt}; aborting"
 fi
+# ingest.sh calls `$YTT_BIN build-index` after a successful pass. A binary
+# that does not implement that subcommand (Homebrew 0.11.0 is still the
+# Python CLI) treats the token as a video ID, fetches it, and reports
+# `ytt: build-index: VideoUnavailable` — three nights of UNHEALTHY index
+# refresh after real ingest (2026-08-16 → 08-19). Fail here, before
+# discovery, so the skew cannot hide behind hours of paced workers.
+if ! "$YTT_BIN" --help 2>&1 | grep -q 'build-index'; then
+    die "ytt at $YTT_BIN does not implement build-index (the ingest scripts require it); aborting"
+fi
 CLAUDE_BIN="${YOUTUBE_INGEST_CLAUDE_BIN:-claude}"
 if ! CLAUDE_BIN="$(command -v "$CLAUDE_BIN")"; then
     die "Claude CLI not found: ${YOUTUBE_INGEST_CLAUDE_BIN:-claude}; aborting"
