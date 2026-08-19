@@ -13,8 +13,9 @@
     still the Python CLI and has no `build-index` subcommand: pointing the
     scheduler at /opt/homebrew/bin/ytt made every successful pass log
     `ytt: build-index: VideoUnavailable` and UNHEALTHY (2026-08-16 → 08-19).
-    YOUTUBE_INGEST_CLAUDE_BIN is also an absolute path so launchd's minimal
-    PATH cannot miss Claude Code.
+    Claudia resolves grok/claude/codex from PATH plus their known install
+    dirs (GROK_BIN / CLAUDE_BIN / CODEX_BIN). ~/.local/bin is on PATH so
+    the Go ytt, grok, and claude are all found without a Claude-only pin.
   - YOUTUBE_CHANNELS_FILE is pinned to ~/.config/ytt/channels.yaml — OUTSIDE
     the install prefix. Pinning the binary above (2026-07-10) moved the script's
     idea of "beside me" into /opt/homebrew/Cellar/ytt/<version>/libexec/, which
@@ -55,7 +56,9 @@
         <string>https://www.youtube.com/playlist?list=PLDVkHXSf0IIdu_-EN_z0lda-LE_J2VRk8</string>
         <key>YOUTUBE_INGEST_YTT_BIN</key>
         <string>/Users/marcelo/.local/bin/ytt</string>
-        <key>YOUTUBE_INGEST_CLAUDE_BIN</key>
+        <key>GROK_BIN</key>
+        <string>/Users/marcelo/.local/bin/grok</string>
+        <key>CLAUDE_BIN</key>
         <string>/Users/marcelo/.local/bin/claude</string>
         <key>YOUTUBE_CHANNELS_FILE</key>
         <string>/Users/marcelo/.config/ytt/channels.yaml</string>

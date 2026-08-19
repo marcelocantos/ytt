@@ -8,6 +8,9 @@ Usage:
                                    (or one JSON object per line with --json)
   ytt ingest [PLAYLIST_URL]        bulk-ingest a playlist + tracked channels
   ytt ingest --dry-run             report the queue without fetching or spending
+  ytt synopsis --dir DIR --title T --url URL
+                                   write one synopsis via Claudia
+                                   (ladder: grok → claude → codex)
 
 Accepted input forms:
   dQw4w9WgXcQ                      raw 11-character video ID

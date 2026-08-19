@@ -122,7 +122,7 @@ load lib
     run_ingest
 
     [ "$status" -eq 1 ]
-    [[ "$output" == *"deferred (Claude spend limit"* ]]
+    [[ "$output" == *"deferred (synopsis providers at capacity"* ]]
     ! grep -Fxq -- "SPEND1-----" "$ROOT/.processed" 2>/dev/null
     # Marker is cleaned up by ingest.sh after detecting it.
     [ ! -f "$ROOT/.spend-limit" ]
@@ -216,25 +216,22 @@ EOF
     [ ! -e "$ROOT/NOINDEX----" ]
 }
 
-@test "missing Claude CLI aborts before discovery or per-video writes" {
-    set_playlist "CLAUDEMISS-"
-    export YOUTUBE_INGEST_CLAUDE_BIN="$BATS_TEST_TMPDIR/missing-claude"
+@test "ytt without synopsis aborts before discovery" {
+    set_playlist "NOSYN------"
+    old_ytt="$BATS_TEST_TMPDIR/old-ytt"
+    cat > "$old_ytt" <<'EOF'
+#!/usr/bin/env bash
+echo "ytt build-index    regenerate the knowledge-base index"
+exit 0
+EOF
+    chmod +x "$old_ytt"
+    export YOUTUBE_INGEST_YTT_BIN="$old_ytt"
 
     run_ingest
 
     [ "$status" -eq 1 ]
-    [[ "$output" == *"Claude CLI not found"* ]]
-    [ ! -e "$ROOT/CLAUDEMISS-" ]
-}
-
-@test "ingest-one rejects a missing Claude CLI before creating a video directory" {
-    export YOUTUBE_INGEST_CLAUDE_BIN="$BATS_TEST_TMPDIR/missing-claude"
-
-    run_ingest_one "CLAUDEONE--"
-
-    [ "$status" -eq 1 ]
-    grep -Fq "Claude CLI not found" "$ROOT/.ingest.log"
-    [ ! -e "$ROOT/CLAUDEONE--" ]
+    [[ "$output" == *"does not implement synopsis"* ]]
+    [ ! -e "$ROOT/NOSYN------" ]
 }
 
 @test "--help prints usage and touches nothing" {
@@ -564,15 +561,22 @@ EOF
     [[ "$(reported)" == *"failed to ingest and stay pending"* ]]
 }
 
-@test "a missing Claude CLI alerts before discovery" {
-    export YOUTUBE_INGEST_CLAUDE_BIN="/nonexistent/claude"
+@test "a ytt missing synopsis alerts before discovery" {
+    old_ytt="$BATS_TEST_TMPDIR/old-ytt"
+    cat > "$old_ytt" <<'EOF'
+#!/usr/bin/env bash
+echo "ytt build-index    regenerate the knowledge-base index"
+exit 0
+EOF
+    chmod +x "$old_ytt"
+    export YOUTUBE_INGEST_YTT_BIN="$old_ytt"
     set_playlist "VID300-----"
 
     run_ingest
 
     [ "$status" -eq 1 ]
     [[ "$(reported)" == *"send problem ytt ingest aborted before discovery"* ]]
-    [[ "$(reported)" == *"Claude CLI not found"* ]]
+    [[ "$(reported)" == *"does not implement synopsis"* ]]
 }
 
 @test "network give-up alerts instead of dying into the log" {

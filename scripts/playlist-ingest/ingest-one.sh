@@ -40,7 +40,6 @@ URL="https://www.youtube.com/watch?v=$ID"
 # interactive shell can't resolve two different ytt builds (the skew behind the
 # June --json outage).
 YTT_BIN="${YOUTUBE_INGEST_YTT_BIN:-ytt}"
-CLAUDE_BIN="${YOUTUBE_INGEST_CLAUDE_BIN:-claude}"
 
 log() {
     # Single-shot printf is atomic for short lines (< PIPE_BUF) on POSIX,
@@ -48,17 +47,13 @@ log() {
     printf '[%s] [%s] %s\n' "$(date -u +%FT%TZ)" "$ID" "$*" >>"$LOG"
 }
 
-# The parent resolves both commands before discovery. Keep this guard for
-# standalone use so a missing CLI fails before fetch/pacing creates a partial
-# video directory. command -v also turns a PATH lookup into an absolute path
+# The parent resolves ytt before discovery. Keep this guard for standalone
+# use so a missing CLI fails before fetch/pacing creates a partial video
+# directory. command -v also turns a PATH lookup into an absolute path
 # for the invocation below.
 mkdir -p "$ROOT"
 if ! YTT_BIN="$(command -v "$YTT_BIN")"; then
     log "ytt executable not found: ${YOUTUBE_INGEST_YTT_BIN:-ytt}; aborting"
-    exit 1
-fi
-if ! CLAUDE_BIN="$(command -v "$CLAUDE_BIN")"; then
-    log "Claude CLI not found: ${YOUTUBE_INGEST_CLAUDE_BIN:-claude}; aborting"
     exit 1
 fi
 
@@ -196,69 +191,31 @@ fi
 
 TITLE=$(jq -r '.title // "(unknown)"' "$DIR/meta.json" 2>/dev/null || echo "(unknown)")
 
-# The output format is defined once, in synopsis-contract.md next to this
-# script (bundled into libexec alongside it by the brew formula). Read it and
-# append it verbatim so the scheduled path and the interactive /ytt skill — the
-# other consumer of that file — can never drift from each other or from the
-# `ytt build-index` parser.
-CONTRACT_FILE="$(cd "$(dirname "$0")" && pwd)/synopsis-contract.md"
-if [[ ! -f "$CONTRACT_FILE" ]]; then
-    log "synopsis contract not found at $CONTRACT_FILE; cleaning up"
-    rm -rf "$DIR"
-    exit 1
-fi
-CONTRACT=$(<"$CONTRACT_FILE")
-
-PROMPT=$(cat <<EOF
-Read the transcript at $DIR/.transcript/transcript.json (YouTube video:
-"$TITLE", $URL). The file is the full youtube-transcript-api payload:
-a JSON object with video_id, language, language_code, is_generated, and
-a snippets array of {text, start, duration}. Join snippet text in order
-for the prose; you may cite [mm:ss] timestamps (from snippet.start) in
-Key Takeaways when a moment is worth pinning to.
-
-Produce a detailed synopsis and key takeaways for this video, following
-the output format defined below. Fill "<video title>" with "$TITLE" and
-"<youtube URL>" with $URL. Write the result to \$DIR/<slug>.md, where
-\$DIR is $DIR and <slug> is the filename slug you choose per the contract.
-
-Do not write anything else to disk. Reply with just the slug filename
-(e.g. "claude-desktop-project-features.md") when finished — nothing else.
-
------8<----- output format contract -----8<-----
-$CONTRACT
-EOF
-)
-
-# Generate the synopsis. Capture Claude's output so a spend/usage-limit
-# refusal — which will hit every remaining video too — can be told apart from
-# an ordinary per-video failure. On the spend limit, exit 255: xargs treats
-# 255 as "stop, read no more input", so the parent stops dispatching the rest
-# of the batch instead of paced-fetching transcripts for hours only to fail
-# each synopsis. The undispatched videos simply retry once the budget frees.
+# Generate the synopsis through `ytt synopsis` (Claudia Task mode, default
+# ladder grok → claude → codex). The host writes <slug>.md; a 255 from the
+# ladder means every available provider hit a capacity/spend/rate limit, so
+# xargs must stop — remaining videos retry once a budget frees. Per-provider
+# timeout is 10 min inside ytt; the wrapper bounds the whole ladder.
 SYNOPSIS_OUT="$DIR/.transcript/synopsis.out"
-# The transcript is untrusted input; run Claude with CWD pinned to the video
-# dir so acceptEdits auto-approval can't be steered at files outside $DIR
-# (CWD is always writable to a -p session, wherever the worker was launched).
-if ! printf '%s\n' "$PROMPT" | ( cd "$DIR" && with_timeout 600 "$CLAUDE_BIN" -p \
-    --permission-mode acceptEdits \
-    --allowedTools "Read,Write" \
-    --add-dir "$DIR" ) >"$SYNOPSIS_OUT" 2>&1; then
+rc=0
+with_timeout 1800 "$YTT_BIN" synopsis \
+    --dir "$DIR" --title "$TITLE" --url "$URL" >"$SYNOPSIS_OUT" 2>&1 || rc=$?
+if (( rc != 0 )); then
     cat "$SYNOPSIS_OUT" >>"$LOG"
-    if grep -qiE 'monthly spend limit|usage limit|spend(ing)? limit|claude\.ai/settings/usage' "$SYNOPSIS_OUT"; then
+    if (( rc == 255 )); then
         : > "$ROOT/.spend-limit"   # marker: tell the parent the run was cut short
-        log "claude synopsis hit the spend limit; aborting run so the rest defers (exit 255 stops xargs)"
+        log "synopsis ladder exhausted on capacity; aborting run so the rest defers (exit 255 stops xargs)"
         rm -rf "$DIR"
         exit 255
     fi
-    log "claude synopsis failed; cleaning up"
+    log "synopsis failed; cleaning up"
     rm -rf "$DIR"
     exit 1
 fi
 cat "$SYNOPSIS_OUT" >>"$LOG"
 rm -f "$SYNOPSIS_OUT"
 
-# Locate the synopsis file Claude wrote (any *.md other than transcript*).
+# Locate the synopsis file ytt wrote (any *.md other than transcript*).
 SYNOPSIS=$(find "$DIR" -maxdepth 1 -type f -name '*.md' \
     ! -name 'transcript*' -print -quit)
 

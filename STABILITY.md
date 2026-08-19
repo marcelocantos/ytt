@@ -69,7 +69,7 @@ settle (see **Playlist-ingest workflow** below).
 | `YOUTUBE_INGEST_BLURTER_BIN` | `blurter` (PATH) | Needs review |
 | `YOUTUBE_INGEST_CONCURRENCY` | `4` | Stable |
 | `YOUTUBE_INGEST_YTT_BIN` | `ytt` (PATH) | Stable |
-| `YOUTUBE_INGEST_CLAUDE_BIN` | `claude` (PATH) | Stable |
+| `YOUTUBE_INGEST_SYNOPSIS_PROVIDERS` | `grok,claude,codex` | Needs review |
 
 The default `YOUTUBE_INGEST_ROOT` of `~/think/knowledge/youtube` is
 personal-vault-shaped and likely to move to something neutral

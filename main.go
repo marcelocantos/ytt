@@ -45,6 +45,8 @@ VIDEO may be a video ID or any YouTube URL (watch?v=, youtu.be/, /shorts/,
   ytt ingest [--dry-run] [PLAYLIST_URL]
                      bulk-ingest a playlist + tracked channels
   ytt build-index    regenerate the knowledge-base index from synopsis files
+  ytt synopsis --dir DIR --title TITLE --url URL
+                     write a synopsis via Claudia (grok → claude → codex)
 `
 
 func main() {
@@ -59,6 +61,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	if len(args) > 0 && args[0] == "build-index" {
 		return cmdBuildIndex(args[1:], stdout, stderr)
+	}
+	if len(args) > 0 && args[0] == "synopsis" {
+		return cmdSynopsis(args[1:], stdout, stderr)
 	}
 
 	fs := flag.NewFlagSet("ytt", flag.ContinueOnError)

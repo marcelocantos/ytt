@@ -93,6 +93,8 @@ ytt --json dQw4w9WgXcQ | jq .
 | Command | Purpose |
 |---|---|
 | `ytt ingest [PLAYLIST_URL]` | Bulk-ingest a playlist + tracked channels — see [Playlist ingest](#playlist-ingest) below |
+| `ytt build-index` | Regenerate `youtube-knowledge-base.md` from ingested synopses |
+| `ytt synopsis --dir DIR --title TITLE --url URL` | Write one video's synopsis via Claudia (grok → claude → codex) |
 
 ## Exit codes
 
@@ -125,7 +127,7 @@ $YOUTUBE_INGEST_ROOT/
 ├── <video-id>/
 │   ├── .transcript/transcript.json # full yt-dlp payload (hidden from Obsidian graph)
 │   ├── meta.json                   # title, channel, upload date, duration, …
-│   └── <slug>.md                   # synopsis (generated via `claude`)
+│   └── <slug>.md                   # synopsis (Claudia: grok → claude → codex)
 ├── .processed                      # dedup state (one video ID per line)
 ├── .channels/<handle>              # per-channel cursor file
 ├── .ingest.log                     # append-only run log
@@ -140,8 +142,8 @@ $YOUTUBE_INGEST_ROOT/
 | `YOUTUBE_INGEST_ROOT` | `~/think/knowledge/youtube` | Where ingested videos land. |
 | `YOUTUBE_CHANNELS_FILE` | `~/.config/ytt/channels.yaml` | YAML list of channels to track newest-first. Resolved from `$XDG_CONFIG_HOME/ytt/` — **not** the install directory, which a `brew upgrade` replaces. |
 | `YOUTUBE_INGEST_CONCURRENCY` | `4` | Parallel video workers. |
-| `YOUTUBE_INGEST_YTT_BIN` | `ytt` (PATH) | Absolute path to the `ytt` used for transcript fetches. Pin it in scheduled runs so launchd and your shell can't resolve two different builds. |
-| `YOUTUBE_INGEST_CLAUDE_BIN` | `claude` (PATH) | Absolute path to Claude Code used for synopses. Pin it in scheduled runs because launchd has a deliberately minimal PATH. |
+| `YOUTUBE_INGEST_YTT_BIN` | `ytt` (PATH) | Absolute path to the `ytt` used for transcript fetches and `ytt synopsis`. Pin it in scheduled runs so launchd and your shell can't resolve two different builds. |
+| `YOUTUBE_INGEST_SYNOPSIS_PROVIDERS` | `grok,claude,codex` | Claudia Task ladder for synopses. Capacity/spend/rate-limit on one provider falls through to the next. |
 | `YOUTUBE_INGEST_LOG` | `$YOUTUBE_INGEST_ROOT/.ingest.log` | Ingest log path. Point it outside the content tree for scheduled runs. |
 | `YOUTUBE_INGEST_NETWORK_WAIT` | `14400` | Seconds to wait (awake-time) for connectivity before giving up — covers launchd ticks that fire in a no-network DarkWake window. |
 | `YOUTUBE_INGEST_STALE_DAYS` | `7` | Days of zero ingests (with channels tracked) before the run is judged unhealthy. `0` disables the check. |
@@ -212,11 +214,11 @@ credential and needs no notification configuration of its own.
 A run is unhealthy when any of these hold, and each is reported as a `problem`
 event:
 
-- a preflight abort (missing `ytt`/`claude`/`curl`, or network never returned)
+- a preflight abort (missing `ytt`/`curl`, or network never returned)
 - a discovery source failed (playlist or channel feed)
 - a channels config was orphaned (see above)
 - any queued video failed to ingest, or the run watchdog fired
-- the Claude spend limit cut the run short
+- every synopsis provider hit a capacity/spend/rate limit, so the run cut short
 - the knowledge-base index failed to refresh
 - **nothing has been ingested for `YOUTUBE_INGEST_STALE_DAYS` days** while
   channels are tracked — the liveness backstop for "every step succeeded and yet

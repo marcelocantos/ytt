@@ -10,6 +10,59 @@ set -e
 # below.
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
     printf 'ytt build-index    regenerate the knowledge-base index\n'
+    printf 'ytt synopsis       write a synopsis via Claudia\n'
+    exit 0
+fi
+
+# `synopsis` is a real subcommand. In tests we fake it so the bats suite
+# does not spawn Grok/Claude/Codex. Honour the same MOCK_CLAUDE_* knobs
+# the old claude mock used, so ingest-one.bats stays stable.
+if [[ "${1:-}" == synopsis ]]; then
+    shift
+    DIR=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dir) DIR="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+    if [[ -z "$DIR" ]]; then
+        echo "mock ytt synopsis: no --dir" >&2
+        exit 2
+    fi
+    ID="$(basename "$DIR")"
+    if [[ ",${MOCK_CLAUDE_FAIL:-}," == *",$ID,"* ]]; then
+        echo "mock ytt synopsis: forced failure for $ID" >&2
+        exit 1
+    fi
+    if [[ ",${MOCK_CLAUDE_SPEND_LIMIT:-}," == *",$ID,"* ]]; then
+        echo "You've hit your monthly spend limit · raise it at claude.ai/settings/usage" >&2
+        exit 255
+    fi
+    if [[ -n "${MOCK_CLAUDE_SLEEP:-}" ]]; then
+        sleep "$MOCK_CLAUDE_SLEEP"
+    fi
+    if [[ ",${MOCK_CLAUDE_NO_WRITE:-}," == *",$ID,"* ]]; then
+        printf 'no-write.md\n'
+        exit 0
+    fi
+    SLUG="mock-synopsis-$ID.md"
+    cat > "$DIR/$SLUG" <<EOF
+# Mock title $ID
+
+Source: https://www.youtube.com/watch?v=$ID
+
+**TL;DR**: Mock TL;DR for $ID.
+
+## Synopsis
+
+Mock synopsis paragraph.
+
+## Key Takeaways
+
+- Mock takeaway
+EOF
+    printf '%s\n' "$SLUG"
     exit 0
 fi
 

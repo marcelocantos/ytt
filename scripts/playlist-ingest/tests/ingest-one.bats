@@ -38,7 +38,7 @@ load lib
     ! grep -Fxq -- "VID003-----" "$ROOT/.processed" 2>/dev/null
 }
 
-@test "ingest-one: claude synopsis failure removes the dir" {
+@test "ingest-one: synopsis failure removes the dir" {
     MOCK_CLAUDE_FAIL="VID004-----" run_ingest_one VID004-----
 
     [ "$status" -ne 0 ]
@@ -46,7 +46,7 @@ load lib
     ! grep -Fxq -- "VID004-----" "$ROOT/.processed" 2>/dev/null
 }
 
-@test "ingest-one: claude exits 0 but writes nothing — dir still removed" {
+@test "ingest-one: synopsis exits 0 but writes nothing — dir still removed" {
     MOCK_CLAUDE_NO_WRITE="VID005-----" run_ingest_one VID005-----
 
     [ "$status" -ne 0 ]

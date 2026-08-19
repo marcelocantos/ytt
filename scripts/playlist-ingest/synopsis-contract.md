@@ -3,8 +3,9 @@
 
   Three parties depend on this file; none of them may restate the format
   in their own words:
-    - ingest-one.sh  reads this file at runtime and appends it to the
-                     `claude -p` synopsis prompt (the scheduled path).
+    - ingest-one.sh  / `ytt synopsis` read this file at runtime and
+                     append it to the Claudia Task prompt (the scheduled
+                     path; ladder grok → claude → codex).
     - the /ytt skill instructs the interactive agent to read this file
                      before composing a synopsis (the manual path).
     - `ytt build-index` (index.go) parses the artifacts this format

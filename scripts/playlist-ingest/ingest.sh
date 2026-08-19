@@ -200,10 +200,12 @@ die() {
     exit 1
 }
 
-# Resolve the two executables which identify the ingest pipeline before doing
-# network discovery or creating per-video state. launchd deliberately starts
-# with a minimal PATH, so leaving either lookup to a worker turns a missing
-# dependency into a misleading, apparently-successful empty run.
+# Resolve the ytt executable which identifies the ingest pipeline before
+# doing network discovery or creating per-video state. launchd deliberately
+# starts with a minimal PATH, so leaving the lookup to a worker turns a
+# missing dependency into a misleading, apparently-successful empty run.
+# Synopses go through `ytt synopsis` (Claudia); grok/claude/codex are
+# resolved by Claudia itself, not by this script.
 YTT_BIN="${YOUTUBE_INGEST_YTT_BIN:-ytt}"
 if ! YTT_BIN="$(command -v "$YTT_BIN")"; then
     die "ytt executable not found: ${YOUTUBE_INGEST_YTT_BIN:-ytt}; aborting"
@@ -217,12 +219,10 @@ fi
 if ! "$YTT_BIN" --help 2>&1 | grep -q 'build-index'; then
     die "ytt at $YTT_BIN does not implement build-index (the ingest scripts require it); aborting"
 fi
-CLAUDE_BIN="${YOUTUBE_INGEST_CLAUDE_BIN:-claude}"
-if ! CLAUDE_BIN="$(command -v "$CLAUDE_BIN")"; then
-    die "Claude CLI not found: ${YOUTUBE_INGEST_CLAUDE_BIN:-claude}; aborting"
+if ! "$YTT_BIN" --help 2>&1 | grep -q 'synopsis'; then
+    die "ytt at $YTT_BIN does not implement synopsis (the ingest scripts require it); aborting"
 fi
 export YOUTUBE_INGEST_YTT_BIN="$YTT_BIN"
-export YOUTUBE_INGEST_CLAUDE_BIN="$CLAUDE_BIN"
 
 # --- bash 3.2 compatibility ------------------------------------------------
 # macOS ships bash 3.2.57 (Apple froze it at the last GPLv2 release) and this
@@ -623,11 +623,12 @@ log "ingesting ${#NEW[@]} videos"
 
 # Fan out. xargs -P bounds concurrency; each worker is one ingest-one.sh
 # invocation. Per-video failures exit non-zero and xargs carries on; those IDs
-# stay out of .processed and retry next run. The exception is a Claude
-# spend-limit refusal: that worker drops a .spend-limit marker and exits 255,
-# which makes xargs stop reading input — dispatching no more videos. (xargs's
-# own exit status for the 255-abort differs across BSD and GNU, so the marker
-# file — not the exit code — is what we trust here.)
+# stay out of .processed and retry next run. The exception is a synopsis
+# ladder that exhausts on capacity (every available provider hit a
+# spend/rate/usage limit): that worker drops a .spend-limit marker and
+# exits 255, which makes xargs stop reading input. (xargs's own exit status
+# for the 255-abort differs across BSD and GNU, so the marker file — not the
+# exit code — is what we trust here.)
 rm -f "$ROOT/.spend-limit"
 run_rc=0
 printf '%s\n' "${NEW[@]}" \
@@ -691,8 +692,8 @@ done
 shopt -u nullglob
 
 if $SPEND_LIMITED; then
-    log "done: $INGESTED ingested, $FAILED deferred (Claude spend limit hit — run cut short; remainder retries next run)"
-    note_issue "Claude spend limit hit — run cut short with $FAILED video(s) deferred to the next run"
+    log "done: $INGESTED ingested, $FAILED deferred (synopsis providers at capacity — run cut short; remainder retries next run)"
+    note_issue "synopsis providers at capacity — run cut short with $FAILED video(s) deferred to the next run"
 else
     log "done: $INGESTED ingested, $FAILED failed"
     if (( FAILED > 0 )); then
