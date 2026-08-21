@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # Ingest new videos from a YouTube playlist and from tracked channels.
 #
-# Usage: ingest.sh [--dry-run] [PLAYLIST_URL]
+# Usage: ingest.sh [--dry-run] [--download|--analyze] [PLAYLIST_URL]
 #   PLAYLIST_URL defaults to $YOUTUBE_INGEST_PLAYLIST and must be an
-#   http(s) URL. -h/--help prints this header.
-#   --dry-run runs discovery (including config resolution and the health
-#   checks) and prints the queue it WOULD ingest, then exits without
-#   fetching transcripts, calling Claude, or touching .processed. This is
-#   the cheap way to answer "is the scheduler actually seeing my channels?"
-#   without paying for a backlog.
+#   http(s) URL, except for --analyze (disk scan only). -h/--help prints
+#   this header.
+#   --download  paced YouTube fetch only: transcript.json + meta.json.
+#               Bounded per tick ($YOUTUBE_INGEST_DOWNLOAD_BATCH, default
+#               16). Does not write synopses or .processed.
+#   --analyze   unthrottled synopsis of every on-disk download that is
+#               not yet in .processed. No YouTube discovery.
+#   neither     download tick, then analyze tick (two fan-outs).
+#   --dry-run   discovery + pending-analyze scan; prints the queues;
+#               touches nothing.
 #
 # Sources:
 #   1. The playlist named by PLAYLIST_URL / $YOUTUBE_INGEST_PLAYLIST.
@@ -76,13 +80,24 @@ case "${1:-}" in
 esac
 
 DRY_RUN=false
-if [[ "${1:-}" == --dry-run ]]; then
-    DRY_RUN=true
-    shift
-fi
+STAGE=all
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run) DRY_RUN=true; shift ;;
+        --download)
+            if [[ "$STAGE" == analyze ]]; then STAGE=all; else STAGE=download; fi
+            shift
+            ;;
+        --analyze)
+            if [[ "$STAGE" == download ]]; then STAGE=all; else STAGE=analyze; fi
+            shift
+            ;;
+        *) break ;;
+    esac
+done
 
 PLAYLIST="${1:-${YOUTUBE_INGEST_PLAYLIST:-}}"
-if [[ -z "$PLAYLIST" ]]; then
+if [[ "$STAGE" != analyze && -z "$PLAYLIST" ]]; then
     echo "error: playlist URL required (arg or \$YOUTUBE_INGEST_PLAYLIST)" >&2
     exit 2
 fi
@@ -90,9 +105,15 @@ fi
 # reach yt-dlp as the playlist: `ingest.sh --help` once became
 # playlist="--help", yt-dlp printed its own help text, and 851 lines of usage
 # output were queued as "video IDs" for ingest.
-if [[ "$PLAYLIST" != http://* && "$PLAYLIST" != https://* ]]; then
-    echo "error: playlist must be an http(s) URL, got: $PLAYLIST" >&2
-    exit 2
+if [[ "$STAGE" != analyze ]]; then
+    # Anything that isn't an http(s) URL — a stray flag, a bare word — must never
+    # reach yt-dlp as the playlist: `ingest.sh --help` once became
+    # playlist="--help", yt-dlp printed its own help text, and 851 lines of usage
+    # output were queued as "video IDs" for ingest.
+    if [[ "$PLAYLIST" != http://* && "$PLAYLIST" != https://* ]]; then
+        echo "error: playlist must be an http(s) URL, got: $PLAYLIST" >&2
+        exit 2
+    fi
 fi
 
 ROOT="${YOUTUBE_INGEST_ROOT:-$HOME/think/knowledge/youtube}"
@@ -102,6 +123,11 @@ STATE="$ROOT/.processed"
 LOG="${YOUTUBE_INGEST_LOG:-$ROOT/.ingest.log}"
 CHANNELS_DIR="$ROOT/.channels"
 CONCURRENCY="${YOUTUBE_INGEST_CONCURRENCY:-4}"
+ANALYZE_CONCURRENCY="${YOUTUBE_INGEST_ANALYZE_CONCURRENCY:-$CONCURRENCY}"
+# Per-tick download cap so a 9k hopper cannot pin launchd for six hours
+# and skip every later tick. 16 IDs at 3–7 min pacing with 4 workers is
+# about one 20-minute StartInterval. 0 disables the cap.
+DOWNLOAD_BATCH="${YOUTUBE_INGEST_DOWNLOAD_BATCH:-16}"
 # Run-level watchdog: a hard cap on the whole fan-out. The per-call timeouts
 # stop any single network/LLM call hanging, but this bounds the run AS A WHOLE
 # so no other failure mode — a stuck worker the timeouts miss, a wedged loop,
@@ -147,6 +173,29 @@ touch "$STATE" "$LOG"
 
 log() {
     printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$LOG" >&2
+}
+
+# A download is complete when both the transcript payload and metadata
+# are non-empty. Analysis (synopsis + .processed) is a later, independent
+# stage; this helper must not look at .processed.
+download_complete() {
+    local d="$ROOT/$1"
+    [[ -s "$d/.transcript/transcript.json" && -s "$d/meta.json" ]]
+}
+
+# IDs on disk that have a complete download and are not yet in .processed.
+collect_pending_analyze() {
+    PENDING_ANALYZE=()
+    shopt -s nullglob
+    local dir id
+    for dir in "$ROOT"/*/; do
+        id="$(basename "$dir")"
+        [[ "$id" =~ ^[A-Za-z0-9_-]{11}$ ]] || continue
+        grep -Fxq -- "$id" "$STATE" && continue
+        download_complete "$id" || continue
+        PENDING_ANALYZE+=("$id")
+    done
+    shopt -u nullglob
 }
 
 # Everything wrong with this run, one human-readable line per problem. This
@@ -216,11 +265,13 @@ fi
 # `ytt: build-index: VideoUnavailable` — three nights of UNHEALTHY index
 # refresh after real ingest (2026-08-16 → 08-19). Fail here, before
 # discovery, so the skew cannot hide behind hours of paced workers.
-if ! "$YTT_BIN" --help 2>&1 | grep -q 'build-index'; then
-    die "ytt at $YTT_BIN does not implement build-index (the ingest scripts require it); aborting"
-fi
-if ! "$YTT_BIN" --help 2>&1 | grep -q 'synopsis'; then
-    die "ytt at $YTT_BIN does not implement synopsis (the ingest scripts require it); aborting"
+if [[ "$STAGE" != download ]]; then
+    if ! "$YTT_BIN" --help 2>&1 | grep -q 'build-index'; then
+        die "ytt at $YTT_BIN does not implement build-index (the ingest scripts require it); aborting"
+    fi
+    if ! "$YTT_BIN" --help 2>&1 | grep -q 'synopsis'; then
+        die "ytt at $YTT_BIN does not implement synopsis (the ingest scripts require it); aborting"
+    fi
 fi
 export YOUTUBE_INGEST_YTT_BIN="$YTT_BIN"
 
@@ -293,19 +344,18 @@ fi
 # because the network dropped is NOT a run that found nothing new.
 DISCOVERY_FAILURES=0
 
-# Heal orphan dirs from previous failed runs. The .processed file is the
-# authoritative record of successful ingest; any per-video dir that exists
-# without being in .processed was killed mid-run, had its synopsis step
-# fail, or otherwise crashed before ingest-one.sh could record success.
-# Wipe the half-built dir and queue the ID for a fresh attempt below.
-# A dry run must not mutate the content tree (2026-08-16: a dry run wiped
-# a same-day manual /ytt ingest that had not yet been recorded in
-# .processed), so it only reports what it would wipe.
+# Heal incomplete downloads from previous failed runs. A dir with both
+# transcript.json and meta.json is pending analysis, not an orphan — wiping
+# it would throw away a paced YouTube fetch. Only half-built dirs (missing
+# either file) are reclaimed. A dry run must not mutate the content tree
+# (2026-08-16: a dry run wiped a same-day manual /ytt ingest that had not
+# yet been recorded in .processed), so it only reports what it would wipe.
 shopt -s nullglob
 ORPHAN_NEW=()
 for dir in "$ROOT"/*/; do
     id="$(basename "$dir")"
     grep -Fxq -- "$id" "$STATE" && continue
+    download_complete "$id" && continue
     ORPHAN_NEW+=("$id")
     $DRY_RUN || rm -rf "$dir"
 done
@@ -315,7 +365,15 @@ if (( ${#ORPHAN_NEW[@]} > 0 )); then
     log "orphan dirs from failed prior runs (queued for retry): ${ORPHAN_NEW[*]}"
 fi
 
+PLAYLIST_PENDING=""
+QUEUE_PENDING=""
+NEW=()
+if [[ "$STAGE" == analyze ]]; then
+    log "analyze-only: skipping YouTube discovery (disk scan follows)"
+fi
+
 # Collect new IDs from the playlist.
+if [[ "$STAGE" != analyze ]]; then
 PLAYLIST_IDS=()
 PLAYLIST_LIST="$(mktemp)"
 if with_timeout 120 yt-dlp --flat-playlist --print id --playlist-reverse "$PLAYLIST" >"$PLAYLIST_LIST"; then
@@ -563,6 +621,7 @@ for ID in ${NEW[@]+"${NEW[@]}"}; do
     fi
 done
 NEW=(${SANE[@]+"${SANE[@]}"})
+fi
 
 # Staleness backstop. Every other check in this script asks "did this step
 # fail?"; none asks "is this pipeline still producing anything?". A config that
@@ -599,17 +658,49 @@ finish() {
     exit 0
 }
 
-if $DRY_RUN; then
-    log "dry run: channels file = $CHANNELS_FILE"
-    log "dry run: ${#NEW[@]} video(s) would be ingested"
-    check_staleness
-    if (( ${#NEW[@]} > 0 )); then printf '%s\n' "${NEW[@]}"; fi
-    # Discovery may have left .discovered files and adopted bootstrap cursors.
-    # Both are idempotent — the next real run rediscovers and consumes them.
-    finish "dry run, ${#NEW[@]} pending"
+# Filter discovery to IDs that still need a YouTube fetch. Already-downloaded
+# IDs skip download and wait for the analyze stage.
+TO_DOWNLOAD=()
+DOWNLOAD_REMAINING=0
+if [[ "$STAGE" != analyze ]]; then
+    for ID in ${NEW[@]+"${NEW[@]}"}; do
+        if download_complete "$ID"; then
+            continue
+        fi
+        TO_DOWNLOAD+=("$ID")
+    done
+    DOWNLOAD_REMAINING=${#TO_DOWNLOAD[@]}
+    if (( DOWNLOAD_BATCH > 0 && ${#TO_DOWNLOAD[@]} > DOWNLOAD_BATCH )); then
+        log "download batch cap: taking $DOWNLOAD_BATCH of ${#TO_DOWNLOAD[@]} pending fetches"
+        _sliced=()
+        _n=0
+        for ID in "${TO_DOWNLOAD[@]}"; do
+            (( _n < DOWNLOAD_BATCH )) || break
+            _sliced+=("$ID")
+            _n=$((_n + 1))
+        done
+        TO_DOWNLOAD=(${_sliced[@]+"${_sliced[@]}"})
+    fi
 fi
 
-if (( ${#NEW[@]} == 0 )); then
+collect_pending_analyze
+
+if $DRY_RUN; then
+    log "dry run: channels file = $CHANNELS_FILE"
+    log "dry run: ${#TO_DOWNLOAD[@]} video(s) would be downloaded, ${#PENDING_ANALYZE[@]} pending analysis"
+    check_staleness
+    if (( ${#TO_DOWNLOAD[@]} > 0 )); then
+        printf '# download\n'
+        printf '%s\n' "${TO_DOWNLOAD[@]}"
+    fi
+    if (( ${#PENDING_ANALYZE[@]} > 0 )); then
+        printf '# analyze\n'
+        printf '%s\n' "${PENDING_ANALYZE[@]}"
+    fi
+    finish "dry run, ${#TO_DOWNLOAD[@]} to download, ${#PENDING_ANALYZE[@]} to analyze"
+fi
+
+if (( ${#TO_DOWNLOAD[@]} == 0 )) && { [[ "$STAGE" == download ]] || (( ${#PENDING_ANALYZE[@]} == 0 )); }; then
     check_staleness
     if (( DISCOVERY_FAILURES > 0 )); then
         log "nothing to do — but $DISCOVERY_FAILURES discovery source(s) FAILED; results incomplete"
@@ -619,41 +710,72 @@ if (( ${#NEW[@]} == 0 )); then
     finish "nothing to do"
 fi
 
-log "ingesting ${#NEW[@]} videos"
-
-# Fan out. xargs -P bounds concurrency; each worker is one ingest-one.sh
-# invocation. Per-video failures exit non-zero and xargs carries on; those IDs
-# stay out of .processed and retry next run. The exception is a synopsis
-# ladder that exhausts on capacity (every available provider hit a
-# spend/rate/usage limit): that worker drops a .spend-limit marker and
-# exits 255, which makes xargs stop reading input. (xargs's own exit status
-# for the 255-abort differs across BSD and GNU, so the marker file — not the
-# exit code — is what we trust here.)
-rm -f "$ROOT/.spend-limit"
-run_rc=0
-printf '%s\n' "${NEW[@]}" \
-    | with_timeout "$RUN_TIMEOUT" xargs -n 1 -P "$CONCURRENCY" "$HERE/ingest-one.sh" \
-    || run_rc=$?
-SPEND_LIMITED=false
-if [[ -f "$ROOT/.spend-limit" ]]; then
-    SPEND_LIMITED=true
-    rm -f "$ROOT/.spend-limit"
-fi
-# run_rc 124 ⇒ the with_timeout cap fired (the run watchdog). Gate the report
-# on the spend-limit marker: GNU xargs ALSO exits 124 when a worker exits 255
-# (the spend-limit abort) while BSD xargs exits 1, so 124 alone is ambiguous —
-# the marker is the reliable spend-limit signal. Workers killed by the cap are
-# bounded by the per-call timeouts and exit on their own within minutes.
-if (( run_rc == 124 )) && ! $SPEND_LIMITED; then
-    log "run watchdog: fan-out exceeded ${RUN_TIMEOUT}s — terminated; unfinished videos retry next run"
+DOWNLOADED=0
+DOWNLOAD_FAILED=0
+download_rc=0
+if [[ "$STAGE" != analyze ]] && (( ${#TO_DOWNLOAD[@]} > 0 )); then
+    log "downloading ${#TO_DOWNLOAD[@]} videos"
+    printf '%s\n' "${TO_DOWNLOAD[@]}" \
+        | with_timeout "$RUN_TIMEOUT" xargs -n 1 -P "$CONCURRENCY" "$HERE/ingest-one.sh" --download \
+        || download_rc=$?
+    if (( download_rc == 124 )); then
+        log "run watchdog: download fan-out exceeded ${RUN_TIMEOUT}s — terminated; unfinished fetches retry next tick"
+        note_issue "download watchdog fired: the fan-out exceeded ${RUN_TIMEOUT}s and was terminated"
+    fi
+    for ID in ${TO_DOWNLOAD[@]+"${TO_DOWNLOAD[@]}"}; do
+        if download_complete "$ID"; then
+            DOWNLOADED=$((DOWNLOADED + 1))
+        else
+            DOWNLOAD_FAILED=$((DOWNLOAD_FAILED + 1))
+        fi
+    done
+    log "downloaded $DOWNLOADED, $DOWNLOAD_FAILED failed this tick"
+    if (( DOWNLOAD_FAILED > 0 )) && (( download_rc != 124 )); then
+        note_issue "$DOWNLOAD_FAILED of ${#TO_DOWNLOAD[@]} download(s) failed this tick and stay pending"
+    fi
 fi
 
-# Recount from state file (authoritative).
+# Analyze everything now on disk, including this tick's downloads.
+# Not YouTube-throttled. Capacity 255 stops the analyze fan-out only.
 INGESTED=0
-for ID in ${NEW[@]+"${NEW[@]}"}; do
-    grep -Fxq -- "$ID" "$STATE" && INGESTED=$((INGESTED + 1))
-done
-FAILED=$(( ${#NEW[@]} - INGESTED ))
+analyze_rc=0
+SPEND_LIMITED=false
+if [[ "$STAGE" != download ]]; then
+    collect_pending_analyze
+    if (( ${#PENDING_ANALYZE[@]} > 0 )); then
+        log "analyzing ${#PENDING_ANALYZE[@]} videos"
+        rm -f "$ROOT/.spend-limit"
+        printf '%s\n' "${PENDING_ANALYZE[@]}" \
+            | with_timeout "$RUN_TIMEOUT" xargs -n 1 -P "$ANALYZE_CONCURRENCY" "$HERE/ingest-one.sh" --analyze \
+            || analyze_rc=$?
+        if [[ -f "$ROOT/.spend-limit" ]]; then
+            SPEND_LIMITED=true
+            rm -f "$ROOT/.spend-limit"
+        fi
+        if (( analyze_rc == 124 )) && ! $SPEND_LIMITED; then
+            log "run watchdog: analyze fan-out exceeded ${RUN_TIMEOUT}s — terminated; unfinished synopses retry next tick"
+            note_issue "analyze watchdog fired: the fan-out exceeded ${RUN_TIMEOUT}s and was terminated"
+        fi
+        for ID in ${PENDING_ANALYZE[@]+"${PENDING_ANALYZE[@]}"}; do
+            grep -Fxq -- "$ID" "$STATE" && INGESTED=$((INGESTED + 1))
+        done
+        ANALYZE_LEFT=$(( ${#PENDING_ANALYZE[@]} - INGESTED ))
+        if $SPEND_LIMITED; then
+            log "analyzed $INGESTED, $ANALYZE_LEFT deferred (synopsis providers at capacity)"
+            note_issue "synopsis providers at capacity — $ANALYZE_LEFT video(s) stay on disk for the next analyze tick"
+        elif (( ANALYZE_LEFT > 0 )) && (( analyze_rc != 124 )); then
+            log "analyzed $INGESTED, $ANALYZE_LEFT failed"
+            note_issue "$ANALYZE_LEFT of ${#PENDING_ANALYZE[@]} analyze(s) failed this tick and stay on disk"
+        else
+            log "analyzed $INGESTED"
+        fi
+    fi
+fi
+
+FAILED=$DOWNLOAD_FAILED
+run_rc=0
+if (( download_rc != 0 )); then run_rc=$download_rc; fi
+if (( analyze_rc != 0 )); then run_rc=$analyze_rc; fi
 
 # Deferred channel-cursor advance. For each channel that had discoveries,
 # walk the discovery list oldest-first; cursor advances over each
@@ -691,27 +813,18 @@ for discovered in "$CHANNELS_DIR"/*.discovered; do
 done
 shopt -u nullglob
 
-if $SPEND_LIMITED; then
-    log "done: $INGESTED ingested, $FAILED deferred (synopsis providers at capacity — run cut short; remainder retries next run)"
-    note_issue "synopsis providers at capacity — run cut short with $FAILED video(s) deferred to the next run"
-else
-    log "done: $INGESTED ingested, $FAILED failed"
-    if (( FAILED > 0 )); then
-        note_issue "$FAILED of ${#NEW[@]} queued video(s) failed to ingest and stay pending for the next run"
-    fi
-fi
-if (( run_rc == 124 )) && ! $SPEND_LIMITED; then
-    note_issue "run watchdog fired: the fan-out exceeded ${RUN_TIMEOUT}s and was terminated"
-fi
 if (( DISCOVERY_FAILURES > 0 )); then
     log "warning: $DISCOVERY_FAILURES discovery source(s) FAILED this run; anything they held surfaces next run"
 fi
+log "done: downloaded=$DOWNLOADED analyzed=$INGESTED download_failed=$DOWNLOAD_FAILED"
 
 # Liveness stamp: only a landed video counts. Advancing this on a merely
 # error-free run would defeat the staleness check entirely.
 if (( INGESTED > 0 )); then
     date -u +%s > "$STAMP"
-else
+elif [[ "$STAGE" != download ]]; then
+    # Download ticks produce no .processed rows; staleness is an analyze
+    # concern (knowledge landing), not a fetch concern.
     check_staleness
 fi
 
@@ -735,4 +848,4 @@ fi
 if (( run_rc != 0 )) && (( ${#ISSUES[@]} == 0 )); then
     note_issue "fan-out exited non-zero (rc=$run_rc) with no per-video failure recorded"
 fi
-finish "$INGESTED ingested, $FAILED failed"
+finish "downloaded $DOWNLOADED, analyzed $INGESTED"

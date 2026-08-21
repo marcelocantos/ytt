@@ -42,8 +42,8 @@ VIDEO may be a video ID or any YouTube URL (watch?v=, youtu.be/, /shorts/,
       --help-agent   print the agent guide (usage text first)
   -h, --help         show this help
 
-  ytt ingest [--dry-run] [PLAYLIST_URL]
-                     bulk-ingest a playlist + tracked channels
+  ytt ingest [--dry-run] [--download|--analyze] [PLAYLIST_URL]
+                     bulk-ingest: paced download and/or unthrottled analyze
   ytt build-index    regenerate the knowledge-base index from synopsis files
   ytt synopsis --dir DIR --title TITLE --url URL
                      write a synopsis via Claudia (grok → claude → codex)

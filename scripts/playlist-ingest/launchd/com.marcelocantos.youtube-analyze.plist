@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Unthrottled YouTube ANALYZE tick. Synopses whatever is already
+  downloaded and not yet in .processed. Install with the download sibling
+  (see com.marcelocantos.youtube-ingest.plist).
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.marcelocantos.youtube-analyze</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/marcelo/.local/bin/ytt</string>
+        <string>ingest</string>
+        <string>--analyze</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/marcelo/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>YOUTUBE_INGEST_YTT_BIN</key>
+        <string>/Users/marcelo/.local/bin/ytt</string>
+        <key>GROK_BIN</key>
+        <string>/Users/marcelo/.local/bin/grok</string>
+        <key>CLAUDE_BIN</key>
+        <string>/Users/marcelo/.local/bin/claude</string>
+        <key>YOUTUBE_CHANNELS_FILE</key>
+        <string>/Users/marcelo/.config/ytt/channels.yaml</string>
+        <key>YOUTUBE_INGEST_BLURTER_BIN</key>
+        <string>/opt/homebrew/bin/blurter</string>
+        <key>YOUTUBE_INGEST_LOG</key>
+        <string>/Users/marcelo/.local/var/log/youtube-ingest/ingest.log</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StartInterval</key>
+    <integer>600</integer>
+    <key>StandardOutPath</key>
+    <string>/Users/marcelo/.local/var/log/youtube-ingest/analyze-launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/marcelo/.local/var/log/youtube-ingest/analyze-launchd.log</string>
+</dict>
+</plist>

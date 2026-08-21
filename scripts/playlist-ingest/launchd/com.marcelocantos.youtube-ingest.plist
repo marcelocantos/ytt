@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Scheduled YouTube ingest. Install with:
+  Paced YouTube DOWNLOAD tick. Install with the analyze sibling:
 
-    cp scripts/playlist-ingest/launchd/com.marcelocantos.youtube-ingest.plist \
+    cp scripts/playlist-ingest/launchd/com.marcelocantos.youtube-*.plist \
        ~/Library/LaunchAgents/
-    launchctl unload ~/Library/LaunchAgents/com.marcelocantos.youtube-ingest.plist 2>/dev/null
-    launchctl load  ~/Library/LaunchAgents/com.marcelocantos.youtube-ingest.plist
+    launchctl bootout gui/$(id -u)/com.marcelocantos.youtube-ingest 2>/dev/null
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.marcelocantos.youtube-ingest.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.marcelocantos.youtube-analyze.plist
 
   Design notes:
   - Pins ProgramArguments and YOUTUBE_INGEST_YTT_BIN to the Go ytt at
@@ -47,6 +48,7 @@
     <array>
         <string>/Users/marcelo/.local/bin/ytt</string>
         <string>ingest</string>
+        <string>--download</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>
@@ -67,13 +69,10 @@
         <key>YOUTUBE_INGEST_LOG</key>
         <string>/Users/marcelo/.local/var/log/youtube-ingest/ingest.log</string>
     </dict>
-    <key>StartCalendarInterval</key>
-    <dict>
-        <key>Hour</key>
-        <integer>6</integer>
-        <key>Minute</key>
-        <integer>30</integer>
-    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StartInterval</key>
+    <integer>1200</integer>
     <key>StandardOutPath</key>
     <string>/Users/marcelo/.local/var/log/youtube-ingest/launchd.log</string>
     <key>StandardErrorPath</key>

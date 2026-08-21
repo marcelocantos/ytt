@@ -6,8 +6,10 @@ Usage:
   ytt --json <video>               full API payload as JSON (one object per video)
   ytt <v1> <v2> ...                multiple videos, separated by a blank line
                                    (or one JSON object per line with --json)
-  ytt ingest [PLAYLIST_URL]        bulk-ingest a playlist + tracked channels
-  ytt ingest --dry-run             report the queue without fetching or spending
+  ytt ingest [PLAYLIST_URL]        download then analyze (two fan-outs)
+  ytt ingest --download            paced YouTube fetch only
+  ytt ingest --analyze             unthrottled synopsis of on-disk downloads
+  ytt ingest --dry-run             report the queues without fetching or spending
   ytt synopsis --dir DIR --title T --url URL
                                    write one synopsis via Claudia
                                    (ladder: grok → claude → codex)

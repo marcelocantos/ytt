@@ -13,12 +13,13 @@ load lib
     grep -Fxq -- "VID001-----" "$ROOT/.processed"
 }
 
-@test "ingest-one: spend-limit refusal exits 255, drops marker, removes dir" {
+@test "ingest-one: spend-limit refusal exits 255, keeps download, drops marker" {
     MOCK_CLAUDE_SPEND_LIMIT="VID006-----" run_ingest_one VID006-----
 
     [ "$status" -eq 255 ]
     [ -f "$ROOT/.spend-limit" ]
-    [ ! -e "$ROOT/VID006-----" ]
+    [ -s "$ROOT/VID006-----/.transcript/transcript.json" ]
+    [ -s "$ROOT/VID006-----/meta.json" ]
     ! grep -Fxq -- "VID006-----" "$ROOT/.processed" 2>/dev/null
 }
 
@@ -38,18 +39,49 @@ load lib
     ! grep -Fxq -- "VID003-----" "$ROOT/.processed" 2>/dev/null
 }
 
-@test "ingest-one: synopsis failure removes the dir" {
+@test "ingest-one: synopsis failure keeps the download" {
     MOCK_CLAUDE_FAIL="VID004-----" run_ingest_one VID004-----
 
     [ "$status" -ne 0 ]
-    [ ! -e "$ROOT/VID004-----" ]
+    [ -s "$ROOT/VID004-----/.transcript/transcript.json" ]
+    [ -s "$ROOT/VID004-----/meta.json" ]
     ! grep -Fxq -- "VID004-----" "$ROOT/.processed" 2>/dev/null
 }
 
-@test "ingest-one: synopsis exits 0 but writes nothing — dir still removed" {
+@test "ingest-one: synopsis exits 0 but writes nothing — download kept" {
     MOCK_CLAUDE_NO_WRITE="VID005-----" run_ingest_one VID005-----
 
     [ "$status" -ne 0 ]
-    [ ! -e "$ROOT/VID005-----" ]
+    [ -s "$ROOT/VID005-----/.transcript/transcript.json" ]
+    [ -s "$ROOT/VID005-----/meta.json" ]
     ! grep -Fxq -- "VID005-----" "$ROOT/.processed" 2>/dev/null
+}
+
+@test "ingest-one --download writes transcript and meta, not synopsis" {
+    run_ingest_one --download VID007-----
+
+    [ "$status" -eq 0 ]
+    [ -s "$ROOT/VID007-----/.transcript/transcript.json" ]
+    [ -s "$ROOT/VID007-----/meta.json" ]
+    [ ! -f "$ROOT/VID007-----/mock-synopsis-VID007-----.md" ]
+    ! grep -Fxq -- "VID007-----" "$ROOT/.processed" 2>/dev/null
+}
+
+@test "ingest-one --analyze synopses an already-downloaded video" {
+    run_ingest_one --download VID008-----
+    [ "$status" -eq 0 ]
+
+    run_ingest_one --analyze VID008-----
+
+    [ "$status" -eq 0 ]
+    [ -f "$ROOT/VID008-----/mock-synopsis-VID008-----.md" ]
+    grep -Fxq -- "VID008-----" "$ROOT/.processed"
+}
+
+@test "ingest-one --analyze without a download fails and creates no dir" {
+    run_ingest_one --analyze VID009-----
+
+    [ "$status" -ne 0 ]
+    [ ! -e "$ROOT/VID009-----" ]
+    ! grep -Fxq -- "VID009-----" "$ROOT/.processed" 2>/dev/null
 }

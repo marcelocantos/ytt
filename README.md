@@ -92,7 +92,9 @@ ytt --json dQw4w9WgXcQ | jq .
 
 | Command | Purpose |
 |---|---|
-| `ytt ingest [PLAYLIST_URL]` | Bulk-ingest a playlist + tracked channels — see [Playlist ingest](#playlist-ingest) below |
+| `ytt ingest [PLAYLIST_URL]` | Download then analyze (two fan-outs) — see [Playlist ingest](#playlist-ingest) below |
+| `ytt ingest --download` | Paced YouTube fetch only (transcript + meta). Bounded per tick. |
+| `ytt ingest --analyze` | Unthrottled synopsis of on-disk downloads not yet in `.processed` |
 | `ytt build-index` | Regenerate `youtube-knowledge-base.md` from ingested synopses |
 | `ytt synopsis --dir DIR --title TITLE --url URL` | Write one video's synopsis via Claudia (grok → claude → codex) |
 
@@ -141,7 +143,9 @@ $YOUTUBE_INGEST_ROOT/
 | `YOUTUBE_INGEST_PLAYLIST` | (required) | Playlist URL. Can be passed as the first arg instead. |
 | `YOUTUBE_INGEST_ROOT` | `~/think/knowledge/youtube` | Where ingested videos land. |
 | `YOUTUBE_CHANNELS_FILE` | `~/.config/ytt/channels.yaml` | YAML list of channels to track newest-first. Resolved from `$XDG_CONFIG_HOME/ytt/` — **not** the install directory, which a `brew upgrade` replaces. |
-| `YOUTUBE_INGEST_CONCURRENCY` | `4` | Parallel video workers. |
+| `YOUTUBE_INGEST_CONCURRENCY` | `4` | Parallel download workers. |
+| `YOUTUBE_INGEST_ANALYZE_CONCURRENCY` | same as download | Parallel analyze workers (no YouTube pacing). |
+| `YOUTUBE_INGEST_DOWNLOAD_BATCH` | `16` | Max videos fetched per download tick. Remainder waits for the next tick. `0` disables. |
 | `YOUTUBE_INGEST_YTT_BIN` | `ytt` (PATH) | Absolute path to the `ytt` used for transcript fetches and `ytt synopsis`. Pin it in scheduled runs so launchd and your shell can't resolve two different builds. |
 | `YOUTUBE_INGEST_SYNOPSIS_PROVIDERS` | `grok,claude,codex` | Claudia Task ladder for synopses. Capacity/spend/rate-limit on one provider falls through to the next. |
 | `YOUTUBE_INGEST_LOG` | `$YOUTUBE_INGEST_ROOT/.ingest.log` | Ingest log path. Point it outside the content tree for scheduled runs. |
@@ -153,19 +157,21 @@ $YOUTUBE_INGEST_ROOT/
 
 ### Scheduling
 
-To run ingest on a daily schedule, install the bundled launchd agent:
+Two launchd jobs: a paced **download** tick every 20 minutes and an
+unthrottled **analyze** tick every 10 minutes. They run whenever the
+laptop is awake.
 
 ```sh
-cp "$(brew --prefix)/libexec/scripts/playlist-ingest/launchd/com.marcelocantos.youtube-ingest.plist" \
+cp scripts/playlist-ingest/launchd/com.marcelocantos.youtube-*.plist \
    ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.marcelocantos.youtube-ingest.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.marcelocantos.youtube-ingest.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.marcelocantos.youtube-analyze.plist
 ```
 
-It runs the installed `ytt ingest` at 06:30 daily, pins the `ytt`
-binary, and writes logs to `~/.local/var/log/youtube-ingest/` (not into
-the content tree). Edit the playlist URL and paths in the plist first;
-they are machine-specific. The scheduled path is deliberately
-network-tolerant: a tick that fires while the machine is asleep or
+Both pin the `ytt` binary and write logs to
+`~/.local/var/log/youtube-ingest/` (not into the content tree). Edit the
+playlist URL and paths in the download plist first; they are
+machine-specific. A tick that fires while the machine is asleep or
 between networks waits for connectivity rather than recording a false
 "nothing new".
 

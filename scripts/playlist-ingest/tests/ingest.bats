@@ -137,7 +137,7 @@ load lib
     run_ingest
 
     [ "$status" -eq 1 ]
-    [[ "$output" == *"run watchdog: fan-out exceeded 1s"* ]]
+    [[ "$output" == *"run watchdog: analyze fan-out exceeded 1s"* ]]
 }
 
 @test "build-index runs after a successful pass" {
@@ -558,7 +558,7 @@ EOF
 
     [ "$status" -eq 1 ]
     [[ "$(reported)" == *"send problem ytt ingest unhealthy"* ]]
-    [[ "$(reported)" == *"failed to ingest and stay pending"* ]]
+    [[ "$(reported)" == *"analyze(s) failed this tick and stay on disk"* ]]
 }
 
 @test "a ytt missing synopsis alerts before discovery" {
@@ -602,12 +602,69 @@ EOF
 
     [ "$status" -eq 0 ]
     # Bootstrap takes only the channel's latest upload, so: 1 playlist + 1 channel.
-    [[ "$output" == *"dry run: 2 video(s) would be ingested"* ]]
+    [[ "$output" == *"dry run: 2 video(s) would be downloaded"* ]]
     [[ "$output" == *"DRY1-------"* ]]
     # Nothing ingested, nothing recorded, nobody paged.
     [ ! -s "$ROOT/.processed" ]
     [ ! -d "$ROOT/DRY1-------" ]
     [ -z "$(reported)" ]
+}
+
+@test "orphan sweep: complete download waiting for analysis is kept" {
+    mkdir -p "$ROOT/PENDID-----/.transcript"
+    printf '{"video_id":"PENDID-----"}\n' > "$ROOT/PENDID-----/.transcript/transcript.json"
+    printf '{"title":"pending","id":"PENDID-----"}\n' > "$ROOT/PENDID-----/meta.json"
+    set_playlist ""
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"orphan dirs from failed prior runs"* ]]
+    grep -Fxq -- "PENDID-----" "$ROOT/.processed"
+    [ -f "$ROOT/PENDID-----/mock-synopsis-PENDID-----.md" ]
+}
+
+@test "--download fetches without analyzing" {
+    set_playlist "DLONLY-----"
+
+    run_ingest --download
+
+    [ "$status" -eq 0 ]
+    [ -s "$ROOT/DLONLY-----/.transcript/transcript.json" ]
+    [ -s "$ROOT/DLONLY-----/meta.json" ]
+    [ ! -f "$ROOT/DLONLY-----/mock-synopsis-DLONLY-----.md" ]
+    ! grep -Fxq -- "DLONLY-----" "$ROOT/.processed" 2>/dev/null
+}
+
+@test "--analyze synopses on-disk downloads and skips YouTube discovery" {
+    mkdir -p "$ROOT/ANONLY-----/.transcript"
+    printf '{"video_id":"ANONLY-----"}\n' > "$ROOT/ANONLY-----/.transcript/transcript.json"
+    printf '{"title":"on disk","id":"ANONLY-----"}\n' > "$ROOT/ANONLY-----/meta.json"
+    set_playlist "SHOULDNT---"
+
+    run_ingest --analyze
+
+    [ "$status" -eq 0 ]
+    grep -Fxq -- "ANONLY-----" "$ROOT/.processed"
+    [ -f "$ROOT/ANONLY-----/mock-synopsis-ANONLY-----.md" ]
+    [ ! -d "$ROOT/SHOULDNT---" ]
+}
+
+@test "download batch remainder is not reported as a failure" {
+    set_playlist "BAT1------- BAT2------- BAT3-------"
+    export YOUTUBE_INGEST_DOWNLOAD_BATCH=1
+
+    run_ingest --download
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"download batch cap: taking 1 of 3 pending fetches"* ]]
+    [[ "$output" != *"UNHEALTHY"* ]]
+    # Exactly one of the three was fetched this tick.
+    n=0
+    for id in BAT1------- BAT2------- BAT3-------; do
+        [ -s "$ROOT/$id/.transcript/transcript.json" ] && n=$((n + 1))
+    done
+    [ "$n" -eq 1 ]
 }
 
 @test "--dry-run surfaces an orphaned config without touching alert state" {

@@ -2,67 +2,66 @@
 # Ingest a single YouTube video by ID into the knowledge base.
 # Intended to be invoked in parallel by ingest.sh; safe to run standalone.
 #
-# Usage: ingest-one.sh <video-id>
+# Usage: ingest-one.sh [--download|--analyze] <video-id>
+#   --download  paced transcript + metadata fetch only (no synopsis)
+#   --analyze   synopsis an already-downloaded video (no YouTube fetch)
+#   neither     download (if needed) then analyze
 #
 # Honours $YOUTUBE_INGEST_ROOT (default ~/think/knowledge/youtube).
-# Appends "<id>" to $ROOT/.processed on success.
+# Appends "<id>" to $ROOT/.processed on successful analysis.
 # Logs to $ROOT/.ingest.log.
 #
-# Rate limiting (shared across all parallel workers — keeps YouTube from
-# IP-blocking this egress IP for bursty access). Consecutive YouTube requests
-# are spaced by a random delay drawn from a configurable window; randomising
-# the gap avoids a fixed, fingerprintable cadence:
+# Rate limiting applies to --download only (shared across parallel
+# workers — keeps YouTube from IP-blocking this egress IP). Consecutive
+# YouTube requests are spaced by a random delay:
 #   $YOUTUBE_INGEST_FETCH_INTERVAL_MIN  min seconds between requests (default 180)
 #   $YOUTUBE_INGEST_FETCH_INTERVAL_MAX  max seconds between requests (default 420)
 #   $YOUTUBE_INGEST_FETCH_RETRIES       transcript attempts on IP-block (default 3)
+#
+# Analysis is not YouTube-throttled. A synopsis/capacity failure leaves
+# the download on disk for the next analyze tick.
 
 set -euo pipefail
 
+MODE=all
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --download) MODE=download; shift ;;
+        --analyze)  MODE=analyze;  shift ;;
+        --) shift; break ;;
+        -*)
+            printf 'ingest-one: unknown flag: %s\n' "$1" >&2
+            exit 2
+            ;;
+        *) break ;;
+    esac
+done
+
 ID="${1:?video id required}"
-# Validate at the point of danger: $ID lands in `rm -rf "$ROOT/$ID"` on every
-# failure path below, so a malformed argument (path fragment, usage text from
-# a corrupted queue) must die here, not there. Real YouTube IDs are exactly
-# 11 chars of [A-Za-z0-9_-].
+# Validate at the point of danger: $ID lands in `rm -rf "$ROOT/$ID"` on
+# download-failure paths, so a malformed argument must die here, not there.
+# Real YouTube IDs are exactly 11 chars of [A-Za-z0-9_-].
 if [[ ! "$ID" =~ ^[A-Za-z0-9_-]{11}$ ]]; then
     printf 'ingest-one: invalid video id: %s\n' "$ID" >&2
     exit 2
 fi
 ROOT="${YOUTUBE_INGEST_ROOT:-$HOME/think/knowledge/youtube}"
 STATE="$ROOT/.processed"
-# Log defaults into the content tree for standalone/manual use, but the
-# scheduled runner points $YOUTUBE_INGEST_LOG outside it so scheduled churn
-# doesn't land as commits in ~/think.
 LOG="${YOUTUBE_INGEST_LOG:-$ROOT/.ingest.log}"
 DIR="$ROOT/$ID"
 URL="https://www.youtube.com/watch?v=$ID"
-# Pin which `ytt` this pipeline runs. Unset ⇒ PATH lookup (the standalone
-# default); the scheduled runner sets it to an absolute path so launchd and an
-# interactive shell can't resolve two different ytt builds (the skew behind the
-# June --json outage).
 YTT_BIN="${YOUTUBE_INGEST_YTT_BIN:-ytt}"
 
 log() {
-    # Single-shot printf is atomic for short lines (< PIPE_BUF) on POSIX,
-    # so concurrent workers can append to the same log safely.
     printf '[%s] [%s] %s\n' "$(date -u +%FT%TZ)" "$ID" "$*" >>"$LOG"
 }
 
-# The parent resolves ytt before discovery. Keep this guard for standalone
-# use so a missing CLI fails before fetch/pacing creates a partial video
-# directory. command -v also turns a PATH lookup into an absolute path
-# for the invocation below.
 mkdir -p "$ROOT"
 if ! YTT_BIN="$(command -v "$YTT_BIN")"; then
     log "ytt executable not found: ${YOUTUBE_INGEST_YTT_BIN:-ytt}; aborting"
     exit 1
 fi
 
-# Hard-timeout wrapper for the network / LLM calls below. A stalled connection
-# — common when the laptop sleeps mid-run — otherwise blocks a worker, and thus
-# the whole run, and thus every future run (launchd won't start a second while
-# one is alive), indefinitely: exactly what wedged the pipeline for 4 days.
-# macOS lacks GNU timeout; Homebrew coreutils ships it as `timeout`/`gtimeout`.
-# Falls back to no timeout only if neither exists. Exit 124 ⇒ timed out.
 TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
 with_timeout() {
     local secs="$1"; shift
@@ -73,29 +72,21 @@ with_timeout() {
     fi
 }
 
-# --- Cross-worker YouTube request pacing ---------------------------------
-# YouTube blocks the egress IP ("IpBlocked") when it sees a burst of
-# transcript-API requests, and the block is sticky for minutes — so one burst
-# fails every remaining fetch in a run. To stay far under any burst threshold,
-# serialise YouTube requests across ALL parallel workers and space consecutive
-# requests by a random delay (default 3–7 minutes).
-#
-# Mechanism: a shared stamp file holds the epoch time of the next reservable
-# slot. Each worker briefly takes an atomic mkdir lock, reserves the next slot
-# (stamp += a fresh random interval), releases the lock, then sleeps OUTSIDE
-# the lock until its slot. The lock is held only for a few file ops — never
-# across the multi-minute sleep — so workers reserve staggered slots and wait
-# them out concurrently instead of piling up spinning on the lock. Portable:
-# no flock (absent on macOS); leak detection uses find -mmin, not BSD stat.
-FETCH_MIN="${YOUTUBE_INGEST_FETCH_INTERVAL_MIN:-180}"   # 3 minutes
-FETCH_MAX="${YOUTUBE_INGEST_FETCH_INTERVAL_MAX:-420}"   # 7 minutes
-GATE="$ROOT/.fetch.lock"      # atomic mkdir mutex, held only for a reservation
-STAMP="$ROOT/.fetch.stamp"    # epoch seconds of the next reservable request slot
+download_complete() {
+    [[ -s "$DIR/.transcript/transcript.json" && -s "$DIR/meta.json" ]]
+}
+
+synopsis_file() {
+    find "$DIR" -maxdepth 1 -type f -name '*.md' ! -name 'transcript*' -print -quit
+}
+
+# --- Cross-worker YouTube request pacing (download only) -----------------
+FETCH_MIN="${YOUTUBE_INGEST_FETCH_INTERVAL_MIN:-180}"
+FETCH_MAX="${YOUTUBE_INGEST_FETCH_INTERVAL_MAX:-420}"
+GATE="$ROOT/.fetch.lock"
+STAMP="$ROOT/.fetch.stamp"
 
 throttle() {
-    # Take the lock to reserve a slot. mkdir is atomic, so exactly one worker
-    # reserves at a time. Any lock older than a minute is a leak from a worker
-    # killed mid-reservation (we never hold it that long) — steal it.
     while ! mkdir "$GATE" 2>/dev/null; do
         if find "$GATE" -maxdepth 0 -mmin +1 2>/dev/null | grep -q .; then
             rm -rf "$GATE"
@@ -108,15 +99,11 @@ throttle() {
     interval=$(( FETCH_MIN + RANDOM % (FETCH_MAX - FETCH_MIN + 1) ))
     last=$(cat "$STAMP" 2>/dev/null || echo 0)
     target=$(( last + interval ))
-    # If the line is idle (last slot already in the past), go now; the very
-    # first request of a run therefore fires immediately.
     if (( target < now )); then
         target=$now
     fi
     printf '%s\n' "$target" >"$STAMP"
     rm -rf "$GATE"
-    # Wait out the reservation outside the lock so peers can reserve their own
-    # (later) slots and sleep concurrently.
     local sleep_for=$(( target - now ))
     if (( sleep_for > 0 )); then
         log "pacing: holding ${sleep_for}s for next YouTube request slot"
@@ -124,107 +111,110 @@ throttle() {
     fi
 }
 
-# The transcript is bulky source material consumed once at ingest. Park
-# it in a dotfolder so Obsidian skips it (avoids 16 graph nodes labelled
-# "transcript") while still keeping it on disk for re-runs and review.
-# JSON preserves the upstream library's full payload (per-segment timing,
-# language metadata, auto-generated flag) — pretty-printed via jq so it
-# stays readable when opened directly.
-mkdir -p "$DIR/.transcript"
-
-log "start"
-
-set -o pipefail
-
-# Fetch the transcript, throttled and with bounded retries on IP-block. A
-# block is transient (a cooldown on the egress IP), so back off and retry a
-# few times. Non-block failures (no transcript, private/removed video) are
-# permanent — fail fast rather than burn retries. On final failure the video
-# stays out of .processed and is retried on the next run. stderr is captured
-# (not piped) so we can classify the failure; stdout goes to a raw temp that
-# jq then pretty-prints into the kept transcript.json.
-RAW="$DIR/.transcript/transcript.raw.json"
-attempt=0
-max_attempts="${YOUTUBE_INGEST_FETCH_RETRIES:-3}"
-while :; do
-    throttle
-    rc=0
-    err=$(with_timeout 120 "$YTT_BIN" --json "$URL" 2>&1 >"$RAW") || rc=$?
-    if (( rc == 0 )); then
-        break
+do_download() {
+    if download_complete; then
+        log "already downloaded"
+        return 0
     fi
-    printf '%s\n' "$err" >>"$LOG"
-    attempt=$((attempt + 1))
-    # A timeout (124, a stalled connection) or an IP-block is transient — retry
-    # after the next pacing slot. Anything else (no transcript, private/removed
-    # video) is permanent — fail fast rather than burn retries.
-    if { (( rc != 124 )) && ! grep -qiE 'blocked|too ?many ?requests|429' <<<"$err"; } \
-        || (( attempt >= max_attempts )); then
-        log "ytt failed (rc=$rc); cleaning up"
+
+    mkdir -p "$DIR/.transcript"
+    log "download start"
+    set -o pipefail
+
+    RAW="$DIR/.transcript/transcript.raw.json"
+    attempt=0
+    max_attempts="${YOUTUBE_INGEST_FETCH_RETRIES:-3}"
+    while :; do
+        throttle
+        rc=0
+        err=$(with_timeout 120 "$YTT_BIN" --json "$URL" 2>&1 >"$RAW") || rc=$?
+        if (( rc == 0 )); then
+            break
+        fi
+        printf '%s\n' "$err" >>"$LOG"
+        attempt=$((attempt + 1))
+        if { (( rc != 124 )) && ! grep -qiE 'blocked|too ?many ?requests|429' <<<"$err"; } \
+            || (( attempt >= max_attempts )); then
+            log "ytt failed (rc=$rc); cleaning up"
+            rm -rf "$DIR"
+            exit 1
+        fi
+        log "transcript fetch failed (rc=$rc); will retry ($attempt/$max_attempts) after the next pacing slot"
+    done
+
+    if ! jq . "$RAW" >"$DIR/.transcript/transcript.json"; then
+        log "transcript json malformed; cleaning up"
         rm -rf "$DIR"
         exit 1
     fi
-    log "transcript fetch failed (rc=$rc); will retry ($attempt/$max_attempts) after the next pacing slot"
-done
+    rm -f "$RAW"
 
-if ! jq . "$RAW" >"$DIR/.transcript/transcript.json"; then
-    log "transcript json malformed; cleaning up"
-    rm -rf "$DIR"
-    exit 1
-fi
-rm -f "$RAW"
-
-# Pipe failures cascade via pipefail so a yt-dlp/jq breakage produces a
-# non-zero status (rather than silently writing a 0-byte meta.json that
-# poisons the synopsis step). The metadata fetch is NOT separately paced: it
-# rides immediately after the (paced) transcript fetch, so each video makes a
-# tight request pair every few minutes rather than two multi-minute waits —
-# same gentle aggregate rate, half the wall-clock cost.
-if ! with_timeout 120 yt-dlp --skip-download --print-json "$URL" 2>>"$LOG" \
-    | jq '{id, title, uploader, channel, channel_id, upload_date,
-           duration, view_count, description, webpage_url, tags}' \
-    >"$DIR/meta.json"; then
-    log "meta fetch failed; cleaning up"
-    rm -rf "$DIR"
-    exit 1
-fi
-
-TITLE=$(jq -r '.title // "(unknown)"' "$DIR/meta.json" 2>/dev/null || echo "(unknown)")
-
-# Generate the synopsis through `ytt synopsis` (Claudia Task mode, default
-# ladder grok → claude → codex). The host writes <slug>.md; a 255 from the
-# ladder means every available provider hit a capacity/spend/rate limit, so
-# xargs must stop — remaining videos retry once a budget frees. Per-provider
-# timeout is 10 min inside ytt; the wrapper bounds the whole ladder.
-SYNOPSIS_OUT="$DIR/.transcript/synopsis.out"
-rc=0
-with_timeout 1800 "$YTT_BIN" synopsis \
-    --dir "$DIR" --title "$TITLE" --url "$URL" >"$SYNOPSIS_OUT" 2>&1 || rc=$?
-if (( rc != 0 )); then
-    cat "$SYNOPSIS_OUT" >>"$LOG"
-    if (( rc == 255 )); then
-        : > "$ROOT/.spend-limit"   # marker: tell the parent the run was cut short
-        log "synopsis ladder exhausted on capacity; aborting run so the rest defers (exit 255 stops xargs)"
+    if ! with_timeout 120 yt-dlp --skip-download --print-json "$URL" 2>>"$LOG" \
+        | jq '{id, title, uploader, channel, channel_id, upload_date,
+               duration, view_count, description, webpage_url, tags}' \
+        >"$DIR/meta.json"; then
+        log "meta fetch failed; cleaning up"
         rm -rf "$DIR"
-        exit 255
+        exit 1
     fi
-    log "synopsis failed; cleaning up"
-    rm -rf "$DIR"
-    exit 1
-fi
-cat "$SYNOPSIS_OUT" >>"$LOG"
-rm -f "$SYNOPSIS_OUT"
 
-# Locate the synopsis file ytt wrote (any *.md other than transcript*).
-SYNOPSIS=$(find "$DIR" -maxdepth 1 -type f -name '*.md' \
-    ! -name 'transcript*' -print -quit)
+    TITLE=$(jq -r '.title // "(unknown)"' "$DIR/meta.json" 2>/dev/null || echo "(unknown)")
+    log "downloaded ($TITLE)"
+}
 
-if [[ -z "$SYNOPSIS" || ! -s "$SYNOPSIS" ]]; then
-    log "synopsis file missing or empty; cleaning up"
-    rm -rf "$DIR"
-    exit 1
-fi
+do_analyze() {
+    if grep -Fxq -- "$ID" "$STATE" 2>/dev/null; then
+        log "already analyzed"
+        return 0
+    fi
+    if ! download_complete; then
+        log "analyze skipped: download incomplete"
+        exit 1
+    fi
 
-# Atomic single-line append.
-printf '%s\n' "$ID" >>"$STATE"
-log "ingested ($TITLE)"
+    existing="$(synopsis_file)"
+    if [[ -n "$existing" && -s "$existing" ]]; then
+        printf '%s\n' "$ID" >>"$STATE"
+        log "analyzed (existing synopsis $(basename "$existing"))"
+        return 0
+    fi
+
+    TITLE=$(jq -r '.title // "(unknown)"' "$DIR/meta.json" 2>/dev/null || echo "(unknown)")
+    log "analyze start"
+
+    SYNOPSIS_OUT="$DIR/.transcript/synopsis.out"
+    rc=0
+    with_timeout 1800 "$YTT_BIN" synopsis \
+        --dir "$DIR" --title "$TITLE" --url "$URL" >"$SYNOPSIS_OUT" 2>&1 || rc=$?
+    if (( rc != 0 )); then
+        cat "$SYNOPSIS_OUT" >>"$LOG" 2>/dev/null || true
+        rm -f "$SYNOPSIS_OUT"
+        if (( rc == 255 )); then
+            : > "$ROOT/.spend-limit"
+            log "synopsis ladder exhausted on capacity; aborting analyze so the rest defers (exit 255 stops xargs)"
+            exit 255
+        fi
+        log "synopsis failed; download kept for retry"
+        exit 1
+    fi
+    cat "$SYNOPSIS_OUT" >>"$LOG"
+    rm -f "$SYNOPSIS_OUT"
+
+    SYNOPSIS="$(synopsis_file)"
+    if [[ -z "$SYNOPSIS" || ! -s "$SYNOPSIS" ]]; then
+        log "synopsis file missing or empty; download kept for retry"
+        exit 1
+    fi
+
+    printf '%s\n' "$ID" >>"$STATE"
+    log "analyzed ($TITLE)"
+}
+
+case "$MODE" in
+    download) do_download ;;
+    analyze)  do_analyze ;;
+    all)
+        do_download
+        do_analyze
+        ;;
+esac
