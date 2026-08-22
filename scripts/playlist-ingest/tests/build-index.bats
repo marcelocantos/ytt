@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
-# Tests for build-index.sh: TL;DR extraction, legacy fallback, pipe escaping,
-# and newest-first date sorting.
+# Tests for `ytt build-index`: TL;DR extraction, legacy fallback, pipe
+# escaping, and newest-first date sorting.
 
 load lib
 
@@ -16,7 +16,7 @@ make_video() {
 }
 
 run_build() {
-    run "$SCRIPT_DIR/build-index.sh"
+    run "$YTT_GO_BIN" build-index
 }
 
 @test "TL;DR line is extracted into the index" {
@@ -30,6 +30,22 @@ Body text here."
     [ "$status" -eq 0 ]
     grep -Fq "This is the summary line." "$ROOT/youtube-knowledge-base.md"
     grep -Fq "(AAAAAAAAAAA/first.md)" "$ROOT/youtube-knowledge-base.md"
+}
+
+@test "Caveat line renders under the TL;DR with a thumbs-down marker" {
+    make_video FFFFFFFFFFF 20260101 "Caveated" caveated.md \
+        "# Caveated
+
+**TL;DR**: The pitch.
+
+**Caveat**: Founder marketing; central claim contested.
+
+## Synopsis
+Body."
+    run_build
+    [ "$status" -eq 0 ]
+    grep -Fq '| The pitch.<br>👎 Founder marketing; central claim contested. |' \
+        "$ROOT/youtube-knowledge-base.md"
 }
 
 @test "legacy entry without TL;DR falls back to first synopsis sentence" {

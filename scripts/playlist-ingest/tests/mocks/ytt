@@ -1,8 +1,80 @@
 #!/usr/bin/env bash
 # Mock ytt. Emits a fake `--json` transcript payload (the shape ingest-one
-# feeds to jq) to stdout. Fails for IDs listed in MOCK_YTT_FAIL (comma-sep).
+# feeds to jq) to stdout.
+#   MOCK_YTT_FAIL           — generic failure (not a YouTube dead-end)
+#   MOCK_YTT_NO_TRANSCRIPT  — "no transcript available"
+#   MOCK_YTT_NO_SUCH_FILE   — IO race ("No such file or directory")
 
 set -e
+
+# ingest.sh preflights that `ytt --help` advertises build-index, so the
+# scheduled runner cannot pin a binary that will treat the token as a video
+# ID. Advertise the subcommand here; the real implementation is forwarded
+# below.
+if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
+    printf 'ytt build-index    regenerate the knowledge-base index\n'
+    printf 'ytt synopsis       write a synopsis via Claudia\n'
+    exit 0
+fi
+
+# `synopsis` is a real subcommand. In tests we fake it so the bats suite
+# does not spawn Grok/Claude/Codex. Honour the same MOCK_CLAUDE_* knobs
+# the old claude mock used, so ingest-one.bats stays stable.
+if [[ "${1:-}" == synopsis ]]; then
+    shift
+    DIR=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dir) DIR="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+    if [[ -z "$DIR" ]]; then
+        echo "mock ytt synopsis: no --dir" >&2
+        exit 2
+    fi
+    ID="$(basename "$DIR")"
+    if [[ ",${MOCK_CLAUDE_FAIL:-}," == *",$ID,"* ]]; then
+        echo "mock ytt synopsis: forced failure for $ID" >&2
+        exit 1
+    fi
+    if [[ ",${MOCK_CLAUDE_SPEND_LIMIT:-}," == *",$ID,"* ]]; then
+        echo "You've hit your monthly spend limit · raise it at claude.ai/settings/usage" >&2
+        exit 255
+    fi
+    if [[ -n "${MOCK_CLAUDE_SLEEP:-}" ]]; then
+        sleep "$MOCK_CLAUDE_SLEEP"
+    fi
+    if [[ ",${MOCK_CLAUDE_NO_WRITE:-}," == *",$ID,"* ]]; then
+        printf 'no-write.md\n'
+        exit 0
+    fi
+    SLUG="mock-synopsis-$ID.md"
+    cat > "$DIR/$SLUG" <<EOF
+# Mock title $ID
+
+Source: https://www.youtube.com/watch?v=$ID
+
+**TL;DR**: Mock TL;DR for $ID.
+
+## Synopsis
+
+Mock synopsis paragraph.
+
+## Key Takeaways
+
+- Mock takeaway
+EOF
+    printf '%s\n' "$SLUG"
+    exit 0
+fi
+
+# `build-index` is a real subcommand with no network access, so forward it to
+# the actual binary rather than faking it: the ingest tests assert on the index
+# file it writes, and a stub would make those assertions meaningless.
+if [[ "${1:-}" == "build-index" ]]; then
+    exec "${YTT_GO_BIN:?ytt mock needs YTT_GO_BIN}" "$@"
+fi
 
 # ingest-one invokes `ytt --json <URL>`; pick the URL out by scheme so flag
 # order doesn't matter.
@@ -15,6 +87,14 @@ id="${id%%&*}"
 
 if [[ ",${MOCK_YTT_FAIL:-}," == *",$id,"* ]]; then
     echo "mock ytt: forced failure for $id" >&2
+    exit 1
+fi
+if [[ ",${MOCK_YTT_NO_TRANSCRIPT:-}," == *",$id,"* ]]; then
+    echo "ytt: $id: no transcript available" >&2
+    exit 1
+fi
+if [[ ",${MOCK_YTT_NO_SUCH_FILE:-}," == *",$id,"* ]]; then
+    echo "ytt: $id: open $id/.transcript/transcript.raw.json: No such file or directory" >&2
     exit 1
 fi
 

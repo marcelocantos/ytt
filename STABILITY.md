@@ -13,7 +13,11 @@ get those right.
 
 ## Interaction surface
 
-Snapshot as of v0.5.0.
+Snapshot of this tree (`main.version` is 0.12.0; this is the `v0.12.0`
+release). ytt is a Go CLI
+(`github.com/marcelocantos/ytt`). `ytt ingest` execs the bundled bash
+workflow under `scripts/playlist-ingest/`. There is no Python package,
+pipx install path, or `claude -p` synopsis step.
 
 ### CLI — `ytt` (transcript)
 
@@ -21,7 +25,7 @@ Snapshot as of v0.5.0.
 |---|---|
 | `ytt <video>...` (positional video IDs/URLs) | Stable |
 | `ytt -t <video>` / `ytt --timestamps <video>` | Stable |
-| `ytt --json <video>` | Stable |
+| `ytt -j <video>` / `ytt --json <video>` | Stable |
 | `ytt --version` | Stable |
 | `ytt --help` | Stable |
 | `ytt --help-agent` | Stable |
@@ -37,24 +41,43 @@ Output contract (stable):
 - `--json` mode: one compact JSON object per video on its own line
   (JSONL for multi-video). Object shape: `video_id`, `language`,
   `language_code`, `is_generated`, `snippets:
-  [{text, start, duration}, ...]`. Mirrors the upstream
-  `FetchedTranscript` surface; new top-level fields may be added by
-  upstream and surfaced here without a major bump (consumers must
-  ignore unknown keys).
+  [{text, start, duration}, ...]`. The shape is the public contract;
+  new top-level fields may be added without a major bump (consumers
+  must ignore unknown keys). Seconds render with a trailing `.0` on
+  integral values so existing JSON consumers keep matching.
 - `-t` and `--json` are mutually exclusive.
 - Errors on stderr, one line per failure, `ytt: <video-id>: <reason>`.
 - Exit codes `0` (all ok), `1` (≥1 video failed), `2` (usage error).
 
-### CLI — `ytt ingest` (subcommand, new in v0.5.0)
+### CLI — `ytt ingest` (subcommand)
 
 | Form | Stability |
 |---|---|
 | `ytt ingest [PLAYLIST_URL]` | Needs review |
+| `ytt ingest --download` | Needs review |
+| `ytt ingest --analyze` | Needs review |
+| `ytt ingest --dry-run` | Needs review |
 
 Behaviour: passes through to the bundled
 `scripts/playlist-ingest/ingest.sh`, with all remaining args forwarded
-verbatim. Subcommand surface is fluid until the underlying scripts
-settle (see **Playlist-ingest workflow** below).
+verbatim. Default (neither `--download` nor `--analyze`) is two
+fan-outs: paced download, then unthrottled analyze. Subcommand surface
+is fluid until the underlying scripts settle (see **Playlist-ingest
+workflow** below).
+
+### CLI — `ytt build-index` / `ytt synopsis`
+
+| Form | Stability |
+|---|---|
+| `ytt build-index` | Needs review |
+| `ytt synopsis --dir DIR --title TITLE --url URL` | Needs review |
+
+`build-index` rewrites `$YOUTUBE_INGEST_ROOT/youtube-knowledge-base.md`
+from on-disk synopses. `synopsis` runs a Claudia Task ladder (default
+`grok,claude,codex`, overridable with `--providers` or
+`YOUTUBE_INGEST_SYNOPSIS_PROVIDERS`) and writes `<slug>.md` into
+`--dir`. Format of that file is defined only in
+`scripts/playlist-ingest/synopsis-contract.md`.
 
 ### Playlist-ingest workflow — env vars
 
@@ -65,10 +88,14 @@ settle (see **Playlist-ingest workflow** below).
 | `YOUTUBE_CHANNELS_FILE` | `$XDG_CONFIG_HOME/ytt/channels.yaml` | Needs review |
 | `YOUTUBE_INGEST_STALE_DAYS` | `7` | Needs review |
 | `YOUTUBE_INGEST_STATE_DIR` | `$XDG_STATE_HOME/ytt` | Needs review |
+| `YOUTUBE_INGEST_QUEUE` | `$YOUTUBE_INGEST_STATE_DIR/backfill.ids` | Needs review |
 | `YOUTUBE_INGEST_BLURTER_BIN` | `blurter` (PATH) | Needs review |
 | `YOUTUBE_INGEST_CONCURRENCY` | `4` | Stable |
+| `YOUTUBE_INGEST_ANALYZE_CONCURRENCY` | same as download | Needs review |
+| `YOUTUBE_INGEST_DOWNLOAD_BATCH` | `16` | Needs review |
+| `YOUTUBE_INGEST_ORPHAN_MIN` | `60` | Needs review |
 | `YOUTUBE_INGEST_YTT_BIN` | `ytt` (PATH) | Stable |
-| `YOUTUBE_INGEST_CLAUDE_BIN` | `claude` (PATH) | Stable |
+| `YOUTUBE_INGEST_SYNOPSIS_PROVIDERS` | `grok,claude,codex` | Needs review |
 
 The default `YOUTUBE_INGEST_ROOT` of `~/think/knowledge/youtube` is
 personal-vault-shaped and likely to move to something neutral
@@ -82,15 +109,16 @@ personal-vault-shaped and likely to move to something neutral
 | `$ROOT/<video-id>/meta.json` (yt-dlp JSON shape) | Needs review |
 | `$ROOT/<video-id>/<slug>.md` (synopsis) | Fluid |
 | `$ROOT/.processed` (one ID per line) | Stable |
+| `$ROOT/.download-failed` (undownloadable IDs, skipped later) | Needs review |
 | `$ROOT/.channels/<handle>` (cursor file) | Stable |
 | `$ROOT/.ingest.log` | Stable |
 | `$XDG_STATE_HOME/ytt/last-ingest` (liveness stamp, unix seconds) | Needs review |
 | `$ROOT/youtube-knowledge-base.md` (index) | Fluid |
 
 The synopsis file's filename convention (topic slug) and TL;DR-line
-contract emerged from real use; both are still settling. The index
-table format has changed once (v0.5.0: two-column layout) and may
-change again.
+contract are specified in `synopsis-contract.md`. The index is a
+two-column markdown table (title / TL;DR, newest first); the layout
+has changed once (v0.5.0) and may change again.
 
 ### Channel config schema (`channels.yaml`)
 
@@ -99,6 +127,10 @@ channels:
   - handle: <youtube-handle>          # required, with or without leading "@"
     name: <display-name>              # optional, cosmetic
 ```
+
+A 24-character `UC…` channel id is also accepted as `handle` and is
+fetched via `/channel/UC…/videos` (so a Takeout dump does not need a
+handle-resolution pass).
 
 Stability: Needs review. The handle/name pair is the minimum viable
 schema; per-channel options (filters, ingest cadence, alternative
@@ -109,33 +141,31 @@ URLs) are likely to land before 1.0.
 | Channel | Stability |
 |---|---|
 | Homebrew formula `marcelocantos/tap/ytt` | Stable |
-| GitHub release tarballs (`darwin-arm64`, `linux-amd64`, `linux-arm64`) | Stable |
-| `pipx install git+https://github.com/marcelocantos/ytt` | Stable |
-| PyPI publishing | Out of scope (deferred) |
+| GitHub release tarballs (`darwin-arm64`, `linux-amd64`, `linux-arm64`) — static binary plus bundled `scripts/` | Stable |
+| `go install` (binary only; no ingest/synopsis scripts) | Out of scope as a full install |
+| pipx / PyPI / a Python package | Out of scope (retired) |
 
 ## Gaps and prerequisites for 1.0
 
-- **Synopsis convention**: the `<slug>.md` filename and TL;DR-line
-  contract need a written spec. Currently emergent from `ingest-one.sh`
-  prompts; should be documented and tested.
+Verification that already ships (do not re-plan as if it were missing):
+Go `-race` tests cover the CLI, JSON contract, `ytt synopsis` ladder, and
+`ytt build-index`; 73 bats cases cover ingest including bash 3.2 CI. The
+remaining gaps are schema and fixtures, not "only smoke checks exist".
+
 - **Knowledge-base index format**: the two-column layout shipped in
-  v0.5.0 is the second iteration. Settle on a final schema (and ideally
-  a test) before locking in.
+  v0.5.0 is the second iteration. Settle on a final schema before
+  locking in. Parser tests exist (`index_test.go`,
+  `build-index.bats`); the remaining work is the schema, not coverage.
 - **`YOUTUBE_INGEST_ROOT` default**: change from `~/think/knowledge/youtube`
   to a neutral default before 1.0.
-- **Test coverage**: only CLI flag smoke checks and two helper unit
-  asserts exist. No tests for the ingest path, the channel walker, or
-  the index regeneration. At minimum, the channel cursor protocol
-  needs a test before 1.0.
-- **`claude` (npm) dependency**: `ingest-one.sh` shells out to `claude`
-  for synopsis generation. Document the expected version range, or
-  parameterise so users can swap the LLM.
-- **Network-independent transcript test**: the helper unit checks
-  don't exercise transcript parsing. A canned-response fixture
-  would help catch upstream breakage early.
-- **PyPI publishing**: trusted-publisher setup deferred from v0.1.0
-  due to hCaptcha outage. Re-enable before 1.0 so non-Homebrew users
-  have a maintained install path.
+- **Canned yt-dlp json3 fixture**: CLI and JSON rendering are tested
+  against stubs (`main_test.go`). There is still no fixture for the
+  caption-event parser, so json3 shape drift is only caught in production
+  (🎯T20.4).
+- **Provider CLIs for synopses**: `ytt synopsis` talks to Claudia;
+  grok/claude/codex binaries are a runtime dependency of analyze, not
+  of the Go module. Document which of the ladder must be present for
+  a scheduled run.
 
 ## Out of scope for 1.0
 
@@ -144,7 +174,6 @@ URLs) are likely to land before 1.0.
   as a first-class subcommand).
 - Live, watched-folder ingest (current model is one-shot per
   invocation).
-- Synopsis generation without `claude` — the ingest workflow leaves
-  the LLM choice as a deliberate dependency, not a built-in feature.
+- A built-in model. Synopses always go through Claudia providers.
 - Obsidian-specific schema additions (frontmatter tags, dataview
   hints). The on-disk layout stays markdown-with-conventions.

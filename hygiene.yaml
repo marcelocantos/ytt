@@ -436,14 +436,11 @@ items:
   - id: build.gowork-off
     dim: build
     desc: Makefile test/vet recipes set GOWORK=off so a parent go.work cannot break local oracles
-    state: planned
+    state: present
     cadence: once-must-hold
     enforce: warning
     tier: 3
-    reason: >-
-      Parent ~/work/github.com/marcelocantos/go.work does not list this module;
-      `make test` fails here unless GOWORK=off. CI is green (no parent workspace).
-    evidence: {absent: {file: {path: Makefile, matches: 'GOWORK=off'}}}
+    evidence: {file: {path: Makefile, matches: 'GOWORK := off'}}
 
   # ============================ DOCUMENTATION ============================
   - id: docs.agents-guide

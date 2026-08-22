@@ -9,6 +9,18 @@ setup() {
     TESTS_DIR="$SCRIPT_DIR/tests"
     MOCKS_DIR="$TESTS_DIR/mocks"
 
+    # Parts of the pipeline are now subcommands of the Go binary. Point the
+    # tests at the built binary and fail loudly if it is absent: silently
+    # skipping would let these tests pass while exercising nothing.
+    REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+    YTT_GO_BIN="$REPO_ROOT/ytt"
+    export YTT_GO_BIN
+    if [[ ! -x "$YTT_GO_BIN" ]]; then
+        printf 'lib.bash: %s missing or not executable; run `make build` first\n' \
+            "$YTT_GO_BIN" >&2
+        return 1
+    fi
+
     ROOT="$BATS_TEST_TMPDIR/youtube"
     mkdir -p "$ROOT"
 
@@ -35,6 +47,9 @@ setup() {
     # a random 3–7 min per fetch. MIN=MAX=0 ⇒ zero-length reservation, no sleep.
     export YOUTUBE_INGEST_FETCH_INTERVAL_MIN=0
     export YOUTUBE_INGEST_FETCH_INTERVAL_MAX=0
+    # Production age-gates incomplete dirs so analyze cannot wipe an
+    # in-flight fetch. Tests need the old immediate reclaim.
+    export YOUTUBE_INGEST_ORPHAN_MIN=0
 
     # Empty channels file by default; tests opt in via channels_with().
     : > "$YOUTUBE_CHANNELS_FILE"
@@ -44,8 +59,10 @@ setup() {
 
     # Reset failure injection.
     unset MOCK_CLAUDE_FAIL MOCK_YT_DLP_META_FAIL MOCK_YTT_FAIL
+    unset MOCK_YTT_NO_TRANSCRIPT MOCK_YTT_NO_SUCH_FILE
     unset MOCK_YT_DLP_PLAYLIST_FAIL MOCK_YT_DLP_CHANNEL_FAIL
-    unset MOCK_YT_DLP_CHANNEL_TRUNCATE MOCK_CURL_FAIL MOCK_CURL_FAIL_COUNT
+    unset MOCK_YT_DLP_CHANNEL_TRUNCATE MOCK_YT_DLP_MEMBERS_ONLY
+    unset MOCK_CURL_FAIL MOCK_CURL_FAIL_COUNT
     unset YOUTUBE_INGEST_YTT_BIN YOUTUBE_INGEST_CLAUDE_BIN
 
     PATH="$MOCKS_DIR:$PATH"

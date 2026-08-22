@@ -33,6 +33,20 @@ load lib
     [ -d "$ROOT/VID101-----" ]
 }
 
+@test "orphan sweep: dry run reports the orphan but does not delete its dir" {
+    mkdir -p "$ROOT/VID102-----/.transcript"
+    : > "$ROOT/VID102-----/meta.json"
+    set_playlist "VID102-----"
+
+    run_ingest --dry-run
+
+    [[ "$output" == *"orphan dirs from failed prior runs (queued for retry): VID102-----"* ]]
+    [ -f "$ROOT/VID102-----/meta.json" ]
+    # Not ingested and not marked processed — a dry run only reports.
+    [ ! -f "$ROOT/VID102-----/mock-synopsis-VID102-----.md" ]
+    ! grep -Fxq -- "VID102-----" "$ROOT/.processed"
+}
+
 @test "stale cursor (not in .processed): walk proceeds past it; videos recovered" {
     channels_with "@stalechan"
     set_channel stalechan VIDA------- VIDB------- VIDC------- VIDD-------
@@ -108,7 +122,7 @@ load lib
     run_ingest
 
     [ "$status" -eq 1 ]
-    [[ "$output" == *"deferred (Claude spend limit"* ]]
+    [[ "$output" == *"deferred (synopsis providers at capacity"* ]]
     ! grep -Fxq -- "SPEND1-----" "$ROOT/.processed" 2>/dev/null
     # Marker is cleaned up by ingest.sh after detecting it.
     [ ! -f "$ROOT/.spend-limit" ]
@@ -123,7 +137,7 @@ load lib
     run_ingest
 
     [ "$status" -eq 1 ]
-    [[ "$output" == *"run watchdog: fan-out exceeded 1s"* ]]
+    [[ "$output" == *"run watchdog: analyze fan-out exceeded 1s"* ]]
 }
 
 @test "build-index runs after a successful pass" {
@@ -183,25 +197,41 @@ load lib
     [ ! -f "$ROOT/.channels/failchan" ]
 }
 
-@test "missing Claude CLI aborts before discovery or per-video writes" {
-    set_playlist "CLAUDEMISS-"
-    export YOUTUBE_INGEST_CLAUDE_BIN="$BATS_TEST_TMPDIR/missing-claude"
+@test "ytt without build-index aborts before discovery" {
+    set_playlist "NOINDEX----"
+    old_ytt="$BATS_TEST_TMPDIR/old-ytt"
+    cat > "$old_ytt" <<'EOF'
+#!/usr/bin/env bash
+# Stand-in for Homebrew 0.11.0: argparse help, no build-index subcommand.
+echo "usage: ytt [-h] [-t | --json] [VIDEO ...]"
+exit 0
+EOF
+    chmod +x "$old_ytt"
+    export YOUTUBE_INGEST_YTT_BIN="$old_ytt"
 
     run_ingest
 
     [ "$status" -eq 1 ]
-    [[ "$output" == *"Claude CLI not found"* ]]
-    [ ! -e "$ROOT/CLAUDEMISS-" ]
+    [[ "$output" == *"does not implement build-index"* ]]
+    [ ! -e "$ROOT/NOINDEX----" ]
 }
 
-@test "ingest-one rejects a missing Claude CLI before creating a video directory" {
-    export YOUTUBE_INGEST_CLAUDE_BIN="$BATS_TEST_TMPDIR/missing-claude"
+@test "ytt without synopsis aborts before discovery" {
+    set_playlist "NOSYN------"
+    old_ytt="$BATS_TEST_TMPDIR/old-ytt"
+    cat > "$old_ytt" <<'EOF'
+#!/usr/bin/env bash
+echo "ytt build-index    regenerate the knowledge-base index"
+exit 0
+EOF
+    chmod +x "$old_ytt"
+    export YOUTUBE_INGEST_YTT_BIN="$old_ytt"
 
-    run_ingest_one "CLAUDEONE--"
+    run_ingest
 
     [ "$status" -eq 1 ]
-    grep -Fq "Claude CLI not found" "$ROOT/.ingest.log"
-    [ ! -e "$ROOT/CLAUDEONE--" ]
+    [[ "$output" == *"does not implement synopsis"* ]]
+    [ ! -e "$ROOT/NOSYN------" ]
 }
 
 @test "--help prints usage and touches nothing" {
@@ -398,6 +428,57 @@ load lib
     ! grep -Fxq -- "XDGVID1----" "$ROOT/.processed"
 }
 
+@test "extra-id queue: pending IDs are ingested through the paced workers" {
+    set_playlist ""
+    export YOUTUBE_INGEST_QUEUE="$BATS_TEST_TMPDIR/backfill.ids"
+    printf '%s\n' "QID100-----" "# comment" "QID101-----" "" > "$YOUTUBE_INGEST_QUEUE"
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"queue=$YOUTUBE_INGEST_QUEUE pending=2"* ]]
+    grep -Fxq -- "QID100-----" "$ROOT/.processed"
+    grep -Fxq -- "QID101-----" "$ROOT/.processed"
+}
+
+@test "extra-id queue: already-processed IDs are skipped" {
+    set_playlist ""
+    mark_processed "QID200-----"
+    export YOUTUBE_INGEST_QUEUE="$BATS_TEST_TMPDIR/backfill.ids"
+    printf '%s\n' "QID200-----" "QID201-----" > "$YOUTUBE_INGEST_QUEUE"
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"pending=1"* ]]
+    grep -Fxq -- "QID201-----" "$ROOT/.processed"
+}
+
+@test "extra-id queue: junk lines are dropped rather than dispatched" {
+    set_playlist ""
+    export YOUTUBE_INGEST_QUEUE="$BATS_TEST_TMPDIR/backfill.ids"
+    printf '%s\n' "not-an-id" "QID300-----" "Options:" > "$YOUTUBE_INGEST_QUEUE"
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"dropping junk id from queue: not-an-id"* ]]
+    [[ "$output" == *"dropping junk id from queue: Options:"* ]]
+    grep -Fxq -- "QID300-----" "$ROOT/.processed"
+}
+
+@test "UC-id channel handle walks /channel/UC…/videos" {
+    channels_with "UCabcdefghijklmnopqrstuv"
+    set_channel UCabcdefghijklmnopqrstuv UCVID1-----
+    set_playlist ""
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    grep -Fxq -- "UCVID1-----" "$ROOT/.processed"
+    [ -f "$ROOT/.channels/UCabcdefghijklmnopqrstuv" ]
+}
+
 # --- staleness backstop: success that produces nothing, forever -------------
 
 @test "staleness: tracked channels producing nothing for too long is unhealthy" {
@@ -477,18 +558,25 @@ load lib
 
     [ "$status" -eq 1 ]
     [[ "$(reported)" == *"send problem ytt ingest unhealthy"* ]]
-    [[ "$(reported)" == *"failed to ingest and stay pending"* ]]
+    [[ "$(reported)" == *"analyze(s) failed this tick and stay on disk"* ]]
 }
 
-@test "a missing Claude CLI alerts before discovery" {
-    export YOUTUBE_INGEST_CLAUDE_BIN="/nonexistent/claude"
+@test "a ytt missing synopsis alerts before discovery" {
+    old_ytt="$BATS_TEST_TMPDIR/old-ytt"
+    cat > "$old_ytt" <<'EOF'
+#!/usr/bin/env bash
+echo "ytt build-index    regenerate the knowledge-base index"
+exit 0
+EOF
+    chmod +x "$old_ytt"
+    export YOUTUBE_INGEST_YTT_BIN="$old_ytt"
     set_playlist "VID300-----"
 
     run_ingest
 
     [ "$status" -eq 1 ]
     [[ "$(reported)" == *"send problem ytt ingest aborted before discovery"* ]]
-    [[ "$(reported)" == *"Claude CLI not found"* ]]
+    [[ "$(reported)" == *"does not implement synopsis"* ]]
 }
 
 @test "network give-up alerts instead of dying into the log" {
@@ -514,12 +602,179 @@ load lib
 
     [ "$status" -eq 0 ]
     # Bootstrap takes only the channel's latest upload, so: 1 playlist + 1 channel.
-    [[ "$output" == *"dry run: 2 video(s) would be ingested"* ]]
+    [[ "$output" == *"dry run: 2 video(s) would be downloaded"* ]]
     [[ "$output" == *"DRY1-------"* ]]
     # Nothing ingested, nothing recorded, nobody paged.
     [ ! -s "$ROOT/.processed" ]
     [ ! -d "$ROOT/DRY1-------" ]
     [ -z "$(reported)" ]
+}
+
+@test "orphan sweep: complete download waiting for analysis is kept" {
+    mkdir -p "$ROOT/PENDID-----/.transcript"
+    printf '{"video_id":"PENDID-----"}\n' > "$ROOT/PENDID-----/.transcript/transcript.json"
+    printf '{"title":"pending","id":"PENDID-----"}\n' > "$ROOT/PENDID-----/meta.json"
+    set_playlist ""
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"orphan dirs from failed prior runs"* ]]
+    grep -Fxq -- "PENDID-----" "$ROOT/.processed"
+    [ -f "$ROOT/PENDID-----/mock-synopsis-PENDID-----.md" ]
+}
+
+@test "--download fetches without analyzing" {
+    set_playlist "DLONLY-----"
+
+    run_ingest --download
+
+    [ "$status" -eq 0 ]
+    [ -s "$ROOT/DLONLY-----/.transcript/transcript.json" ]
+    [ -s "$ROOT/DLONLY-----/meta.json" ]
+    [ ! -f "$ROOT/DLONLY-----/mock-synopsis-DLONLY-----.md" ]
+    ! grep -Fxq -- "DLONLY-----" "$ROOT/.processed" 2>/dev/null
+}
+
+@test "--analyze synopses on-disk downloads and skips YouTube discovery" {
+    mkdir -p "$ROOT/ANONLY-----/.transcript"
+    printf '{"video_id":"ANONLY-----"}\n' > "$ROOT/ANONLY-----/.transcript/transcript.json"
+    printf '{"title":"on disk","id":"ANONLY-----"}\n' > "$ROOT/ANONLY-----/meta.json"
+    set_playlist "SHOULDNT---"
+
+    run_ingest --analyze
+
+    [ "$status" -eq 0 ]
+    grep -Fxq -- "ANONLY-----" "$ROOT/.processed"
+    [ -f "$ROOT/ANONLY-----/mock-synopsis-ANONLY-----.md" ]
+    [ ! -d "$ROOT/SHOULDNT---" ]
+}
+
+@test "undownloadable ids are recorded once and not retried" {
+    set_playlist "FAILID----- GOODID-----"
+    export MOCK_YTT_NO_TRANSCRIPT="FAILID-----"
+    export YOUTUBE_INGEST_DOWNLOAD_BATCH=16
+
+    run_ingest --download
+    [ "$status" -eq 0 ]
+    grep -Fxq -- "FAILID-----" "$ROOT/.download-failed"
+    [ -s "$ROOT/GOODID-----/.transcript/transcript.json" ]
+    [[ "$output" != *"UNHEALTHY"* ]]
+
+    run_ingest --download
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"[FAILID-----] download start"* ]]
+    [[ "$output" != *"UNHEALTHY"* ]]
+}
+
+@test "transient ytt failures are not recorded and are retried next tick" {
+    set_playlist "FAILID----- GOODID-----"
+    export MOCK_YTT_FAIL="FAILID-----"
+    export YOUTUBE_INGEST_DOWNLOAD_BATCH=16
+
+    run_ingest --download
+    [ "$status" -ne 0 ]
+    ! grep -Fxq -- "FAILID-----" "$ROOT/.download-failed" 2>/dev/null
+    [ -s "$ROOT/GOODID-----/.transcript/transcript.json" ]
+    [[ "$output" == *"UNHEALTHY"* ]]
+    [[ "$output" == *"failed this tick and stay pending"* ]]
+
+    run_ingest --download
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"UNHEALTHY"* ]]
+    [[ "$output" == *"failed this tick and stay pending"* ]]
+    ! grep -Fxq -- "FAILID-----" "$ROOT/.download-failed" 2>/dev/null
+    # Worker lines go to $ROOT/.ingest.log, not ingest.sh stdout.
+    [ "$(grep -c '\[FAILID-----\] download start' "$ROOT/.ingest.log")" -ge 2 ]
+}
+
+@test "playlist members-only ids are skipped at discovery, not downloaded" {
+    set_playlist "PUB1------- MEM1------- PUB2-------"
+    export MOCK_YT_DLP_MEMBERS_ONLY="MEM1-------"
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"skipping subscriber_only MEM1------- at discovery"* ]]
+    grep -Fxq -- "MEM1-------" "$ROOT/.download-failed"
+    grep -Fxq -- "PUB1-------" "$ROOT/.processed"
+    grep -Fxq -- "PUB2-------" "$ROOT/.processed"
+    ! grep -Fxq -- "MEM1-------" "$ROOT/.processed"
+    [ ! -d "$ROOT/MEM1-------" ]
+    [[ "$output" != *"UNHEALTHY"* ]]
+    [[ "$output" != *"[MEM1-------] download start"* ]]
+}
+
+@test "channel feed members-only ids are skipped; cursor still advances over public" {
+    channels_with "@memchan"
+    set_channel memchan NEW1------- MEM2------- CURSOR-----
+    mark_processed "CURSOR-----"
+    set_cursor memchan "CURSOR-----"
+    export MOCK_YT_DLP_MEMBERS_ONLY="MEM2-------"
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    grep -Fxq -- "MEM2-------" "$ROOT/.download-failed"
+    grep -Fxq -- "NEW1-------" "$ROOT/.processed"
+    ! grep -Fxq -- "MEM2-------" "$ROOT/.processed"
+    [ ! -d "$ROOT/MEM2-------" ]
+    [ "$(cat "$ROOT/.channels/memchan")" = "NEW1-------" ]
+    [[ "$output" != *"[MEM2-------] download start"* ]]
+    [[ "$output" != *"UNHEALTHY"* ]]
+}
+
+@test "channel bootstrap whose latest upload is members-only starts at the newest public" {
+    channels_with "@newmem"
+    set_channel newmem MEM2------- BOOT1------
+    export MOCK_YT_DLP_MEMBERS_ONLY="MEM2-------"
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    grep -Fxq -- "MEM2-------" "$ROOT/.download-failed"
+    grep -Fxq -- "BOOT1------" "$ROOT/.processed"
+    [ "$(cat "$ROOT/.channels/newmem")" = "BOOT1------" ]
+    [[ "$output" != *"[MEM2-------] download start"* ]]
+}
+
+@test "--analyze does not wipe a fresh incomplete download dir" {
+    mkdir -p "$ROOT/INFLIT-----/.transcript"
+    : > "$ROOT/INFLIT-----/.transcript/transcript.raw.json"
+    set_playlist ""
+
+    run_ingest --analyze
+
+    [ -d "$ROOT/INFLIT-----" ]
+    [ -f "$ROOT/INFLIT-----/.transcript/transcript.raw.json" ]
+}
+
+@test "download tick fetches an id that starts with a dash" {
+    set_playlist "-Gj0-EIyx6g"
+
+    run_ingest --download
+
+    [ "$status" -eq 0 ]
+    [ -s "$ROOT/-Gj0-EIyx6g/.transcript/transcript.json" ]
+    [[ "$output" != *"unknown flag"* ]]
+    [[ "$output" != *"UNHEALTHY"* ]]
+}
+
+@test "download batch remainder is not reported as a failure" {
+    set_playlist "BAT1------- BAT2------- BAT3-------"
+    export YOUTUBE_INGEST_DOWNLOAD_BATCH=1
+
+    run_ingest --download
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"download batch cap: taking 1 of 3 pending fetches"* ]]
+    [[ "$output" != *"UNHEALTHY"* ]]
+    # Exactly one of the three was fetched this tick.
+    n=0
+    for id in BAT1------- BAT2------- BAT3-------; do
+        [ -s "$ROOT/$id/.transcript/transcript.json" ] && n=$((n + 1))
+    done
+    [ "$n" -eq 1 ]
 }
 
 @test "--dry-run surfaces an orphaned config without touching alert state" {
