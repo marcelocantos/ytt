@@ -47,6 +47,7 @@ if [[ ! "$ID" =~ ^[A-Za-z0-9_-]{11}$ ]]; then
 fi
 ROOT="${YOUTUBE_INGEST_ROOT:-$HOME/think/knowledge/youtube}"
 STATE="$ROOT/.processed"
+FAILED_IDS="$ROOT/.download-failed"
 LOG="${YOUTUBE_INGEST_LOG:-$ROOT/.ingest.log}"
 DIR="$ROOT/$ID"
 URL="https://www.youtube.com/watch?v=$ID"
@@ -111,9 +112,19 @@ throttle() {
     fi
 }
 
+record_download_failed() {
+    # One ID per line. Short writes are atomic on POSIX; concurrent workers
+    # can append without a lock the same way they append .processed.
+    printf '%s\n' "$ID" >>"$FAILED_IDS"
+}
+
 do_download() {
     if download_complete; then
         log "already downloaded"
+        return 0
+    fi
+    if grep -Fxq -- "$ID" "$FAILED_IDS" 2>/dev/null; then
+        log "already recorded undownloadable; skipping"
         return 0
     fi
 
@@ -125,6 +136,7 @@ do_download() {
     attempt=0
     max_attempts="${YOUTUBE_INGEST_FETCH_RETRIES:-3}"
     while :; do
+        mkdir -p "$DIR/.transcript"
         throttle
         rc=0
         err=$(with_timeout 120 "$YTT_BIN" --json "$URL" 2>&1 >"$RAW") || rc=$?
@@ -135,7 +147,8 @@ do_download() {
         attempt=$((attempt + 1))
         if { (( rc != 124 )) && ! grep -qiE 'blocked|too ?many ?requests|429' <<<"$err"; } \
             || (( attempt >= max_attempts )); then
-            log "ytt failed (rc=$rc); cleaning up"
+            log "ytt failed (rc=$rc); recording as undownloadable"
+            record_download_failed
             rm -rf "$DIR"
             exit 1
         fi
@@ -143,7 +156,8 @@ do_download() {
     done
 
     if ! jq . "$RAW" >"$DIR/.transcript/transcript.json"; then
-        log "transcript json malformed; cleaning up"
+        log "transcript json malformed; recording as undownloadable"
+        record_download_failed
         rm -rf "$DIR"
         exit 1
     fi
@@ -153,7 +167,8 @@ do_download() {
         | jq '{id, title, uploader, channel, channel_id, upload_date,
                duration, view_count, description, webpage_url, tags}' \
         >"$DIR/meta.json"; then
-        log "meta fetch failed; cleaning up"
+        log "meta fetch failed; recording as undownloadable"
+        record_download_failed
         rm -rf "$DIR"
         exit 1
     fi

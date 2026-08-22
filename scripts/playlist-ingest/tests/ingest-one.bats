@@ -29,6 +29,7 @@ load lib
     [ "$status" -ne 0 ]
     [ ! -e "$ROOT/VID002-----" ]
     ! grep -Fxq -- "VID002-----" "$ROOT/.processed" 2>/dev/null
+    grep -Fxq -- "VID002-----" "$ROOT/.download-failed"
 }
 
 @test "ingest-one: meta-fetch failure (pipefail) removes the dir" {

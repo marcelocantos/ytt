@@ -118,6 +118,7 @@ fi
 
 ROOT="${YOUTUBE_INGEST_ROOT:-$HOME/think/knowledge/youtube}"
 STATE="$ROOT/.processed"
+FAILED_IDS="$ROOT/.download-failed"
 # Log defaults into the content tree for manual use; the scheduled runner
 # points $YOUTUBE_INGEST_LOG outside it so scheduled churn doesn't commit.
 LOG="${YOUTUBE_INGEST_LOG:-$ROOT/.ingest.log}"
@@ -169,7 +170,7 @@ BLURTER_BIN="${YOUTUBE_INGEST_BLURTER_BIN:-blurter}"
 export YOUTUBE_INGEST_ROOT="$ROOT"
 
 mkdir -p "$ROOT" "$CHANNELS_DIR" "$STATE_DIR"
-touch "$STATE" "$LOG"
+touch "$STATE" "$FAILED_IDS" "$LOG"
 
 log() {
     printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$LOG" >&2
@@ -181,6 +182,10 @@ log() {
 download_complete() {
     local d="$ROOT/$1"
     [[ -s "$d/.transcript/transcript.json" && -s "$d/meta.json" ]]
+}
+
+download_rejected() {
+    grep -Fxq -- "$1" "$FAILED_IDS" 2>/dev/null
 }
 
 # IDs on disk that have a complete download and are not yet in .processed.
@@ -265,11 +270,25 @@ fi
 # `ytt: build-index: VideoUnavailable` — three nights of UNHEALTHY index
 # refresh after real ingest (2026-08-16 → 08-19). Fail here, before
 # discovery, so the skew cannot hide behind hours of paced workers.
+ytt_help_has() {
+    local needle="$1" n=0
+    # A `go build -o ytt` can replace this file mid-tick and make --help
+    # empty for a moment. Retry once before treating it as the old
+    # Homebrew-Python skew.
+    while (( n < 2 )); do
+        if "$YTT_BIN" --help 2>&1 | grep -q "$needle"; then
+            return 0
+        fi
+        n=$((n + 1))
+        sleep 1
+    done
+    return 1
+}
 if [[ "$STAGE" != download ]]; then
-    if ! "$YTT_BIN" --help 2>&1 | grep -q 'build-index'; then
+    if ! ytt_help_has 'build-index'; then
         die "ytt at $YTT_BIN does not implement build-index (the ingest scripts require it); aborting"
     fi
-    if ! "$YTT_BIN" --help 2>&1 | grep -q 'synopsis'; then
+    if ! ytt_help_has 'synopsis'; then
         die "ytt at $YTT_BIN does not implement synopsis (the ingest scripts require it); aborting"
     fi
 fi
@@ -345,21 +364,29 @@ fi
 DISCOVERY_FAILURES=0
 
 # Heal incomplete downloads from previous failed runs. A dir with both
-# transcript.json and meta.json is pending analysis, not an orphan — wiping
-# it would throw away a paced YouTube fetch. Only half-built dirs (missing
-# either file) are reclaimed. A dry run must not mutate the content tree
-# (2026-08-16: a dry run wiped a same-day manual /ytt ingest that had not
-# yet been recorded in .processed), so it only reports what it would wipe.
-shopt -s nullglob
+# transcript.json and meta.json is pending analysis, not an orphan.
+# --analyze must not sweep at all: it overlaps the download job, and
+# wiping a dir that is only waiting on the 3–7 min throttle makes the
+# worker fail with "transcript.raw.json: No such file or directory".
+# Download-stage sweep also skips dirs newer than ORPHAN_MIN minutes so
+# a slow in-flight fetch is not reclaimed mid-pacing.
+ORPHAN_MIN="${YOUTUBE_INGEST_ORPHAN_MIN:-60}"
 ORPHAN_NEW=()
-for dir in "$ROOT"/*/; do
-    id="$(basename "$dir")"
-    grep -Fxq -- "$id" "$STATE" && continue
-    download_complete "$id" && continue
-    ORPHAN_NEW+=("$id")
-    $DRY_RUN || rm -rf "$dir"
-done
-shopt -u nullglob
+if [[ "$STAGE" != analyze ]]; then
+    shopt -s nullglob
+    for dir in "$ROOT"/*/; do
+        id="$(basename "$dir")"
+        grep -Fxq -- "$id" "$STATE" && continue
+        download_complete "$id" && continue
+        download_rejected "$id" && { $DRY_RUN || rm -rf "$dir"; continue; }
+        if (( ORPHAN_MIN > 0 )) && find "$dir" -maxdepth 0 -mmin -"$ORPHAN_MIN" 2>/dev/null | grep -q .; then
+            continue
+        fi
+        ORPHAN_NEW+=("$id")
+        $DRY_RUN || rm -rf "$dir"
+    done
+    shopt -u nullglob
+fi
 
 if (( ${#ORPHAN_NEW[@]} > 0 )); then
     log "orphan dirs from failed prior runs (queued for retry): ${ORPHAN_NEW[*]}"
@@ -667,6 +694,9 @@ if [[ "$STAGE" != analyze ]]; then
         if download_complete "$ID"; then
             continue
         fi
+        if download_rejected "$ID"; then
+            continue
+        fi
         TO_DOWNLOAD+=("$ID")
     done
     DOWNLOAD_REMAINING=${#TO_DOWNLOAD[@]}
@@ -722,16 +752,28 @@ if [[ "$STAGE" != analyze ]] && (( ${#TO_DOWNLOAD[@]} > 0 )); then
         log "run watchdog: download fan-out exceeded ${RUN_TIMEOUT}s — terminated; unfinished fetches retry next tick"
         note_issue "download watchdog fired: the fan-out exceeded ${RUN_TIMEOUT}s and was terminated"
     fi
+    PERM_FAIL=0
     for ID in ${TO_DOWNLOAD[@]+"${TO_DOWNLOAD[@]}"}; do
         if download_complete "$ID"; then
             DOWNLOADED=$((DOWNLOADED + 1))
+        elif download_rejected "$ID"; then
+            PERM_FAIL=$((PERM_FAIL + 1))
         else
             DOWNLOAD_FAILED=$((DOWNLOAD_FAILED + 1))
         fi
     done
-    log "downloaded $DOWNLOADED, $DOWNLOAD_FAILED failed this tick"
+    log "downloaded $DOWNLOADED, $PERM_FAIL undownloadable, $DOWNLOAD_FAILED failed this tick"
+    if (( PERM_FAIL > 0 )); then
+        log "recorded $PERM_FAIL undownloadable id(s); skipped on later ticks"
+    fi
     if (( DOWNLOAD_FAILED > 0 )) && (( download_rc != 124 )); then
         note_issue "$DOWNLOAD_FAILED of ${#TO_DOWNLOAD[@]} download(s) failed this tick and stay pending"
+    fi
+    # ingest-one exits 1 for undownloadable ids so xargs records a failure;
+    # that is expected and already counted in PERM_FAIL. Do not let BSD
+    # xargs's non-zero status become a phantom "fan-out exited non-zero".
+    if (( DOWNLOAD_FAILED == 0 )) && (( download_rc != 124 )); then
+        download_rc=0
     fi
 fi
 

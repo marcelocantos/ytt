@@ -47,6 +47,9 @@ setup() {
     # a random 3–7 min per fetch. MIN=MAX=0 ⇒ zero-length reservation, no sleep.
     export YOUTUBE_INGEST_FETCH_INTERVAL_MIN=0
     export YOUTUBE_INGEST_FETCH_INTERVAL_MAX=0
+    # Production age-gates incomplete dirs so analyze cannot wipe an
+    # in-flight fetch. Tests need the old immediate reclaim.
+    export YOUTUBE_INGEST_ORPHAN_MIN=0
 
     # Empty channels file by default; tests opt in via channels_with().
     : > "$YOUTUBE_CHANNELS_FILE"

@@ -70,6 +70,7 @@ settle (see **Playlist-ingest workflow** below).
 | `YOUTUBE_INGEST_CONCURRENCY` | `4` | Stable |
 | `YOUTUBE_INGEST_ANALYZE_CONCURRENCY` | same as download | Needs review |
 | `YOUTUBE_INGEST_DOWNLOAD_BATCH` | `16` | Needs review |
+| `YOUTUBE_INGEST_ORPHAN_MIN` | `60` | Needs review |
 | `YOUTUBE_INGEST_YTT_BIN` | `ytt` (PATH) | Stable |
 | `YOUTUBE_INGEST_SYNOPSIS_PROVIDERS` | `grok,claude,codex` | Needs review |
 

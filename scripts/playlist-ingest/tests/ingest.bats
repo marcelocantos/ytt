@@ -650,6 +650,34 @@ EOF
     [ ! -d "$ROOT/SHOULDNT---" ]
 }
 
+@test "undownloadable ids are recorded once and not retried" {
+    set_playlist "FAILID----- GOODID-----"
+    export MOCK_YTT_FAIL="FAILID-----"
+    export YOUTUBE_INGEST_DOWNLOAD_BATCH=16
+
+    run_ingest --download
+    [ "$status" -eq 0 ]
+    grep -Fxq -- "FAILID-----" "$ROOT/.download-failed"
+    [ -s "$ROOT/GOODID-----/.transcript/transcript.json" ]
+    [[ "$output" != *"UNHEALTHY"* ]]
+
+    run_ingest --download
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"[FAILID-----] download start"* ]]
+    [[ "$output" != *"UNHEALTHY"* ]]
+}
+
+@test "--analyze does not wipe a fresh incomplete download dir" {
+    mkdir -p "$ROOT/INFLIT-----/.transcript"
+    : > "$ROOT/INFLIT-----/.transcript/transcript.raw.json"
+    set_playlist ""
+
+    run_ingest --analyze
+
+    [ -d "$ROOT/INFLIT-----" ]
+    [ -f "$ROOT/INFLIT-----/.transcript/transcript.raw.json" ]
+}
+
 @test "download batch remainder is not reported as a failure" {
     set_playlist "BAT1------- BAT2------- BAT3-------"
     export YOUTUBE_INGEST_DOWNLOAD_BATCH=1
