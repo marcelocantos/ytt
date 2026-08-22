@@ -748,7 +748,7 @@ download_rc=0
 if [[ "$STAGE" != analyze ]] && (( ${#TO_DOWNLOAD[@]} > 0 )); then
     log "downloading ${#TO_DOWNLOAD[@]} videos"
     printf '%s\n' "${TO_DOWNLOAD[@]}" \
-        | with_timeout "$RUN_TIMEOUT" xargs -n 1 -P "$CONCURRENCY" "$HERE/ingest-one.sh" --download \
+        | with_timeout "$RUN_TIMEOUT" xargs -n 1 -P "$CONCURRENCY" "$HERE/ingest-one.sh" --download -- \
         || download_rc=$?
     if (( download_rc == 124 )); then
         log "run watchdog: download fan-out exceeded ${RUN_TIMEOUT}s — terminated; unfinished fetches retry next tick"
@@ -790,7 +790,7 @@ if [[ "$STAGE" != download ]]; then
         log "analyzing ${#PENDING_ANALYZE[@]} videos"
         rm -f "$ROOT/.spend-limit"
         printf '%s\n' "${PENDING_ANALYZE[@]}" \
-            | with_timeout "$RUN_TIMEOUT" xargs -n 1 -P "$ANALYZE_CONCURRENCY" "$HERE/ingest-one.sh" --analyze \
+            | with_timeout "$RUN_TIMEOUT" xargs -n 1 -P "$ANALYZE_CONCURRENCY" "$HERE/ingest-one.sh" --analyze -- \
             || analyze_rc=$?
         if [[ -f "$ROOT/.spend-limit" ]]; then
             SPEND_LIMITED=true

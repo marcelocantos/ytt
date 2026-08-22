@@ -29,7 +29,13 @@ while [[ $# -gt 0 ]]; do
         --download) MODE=download; shift ;;
         --analyze)  MODE=analyze;  shift ;;
         --) shift; break ;;
+        # YouTube IDs are 11 chars of [A-Za-z0-9_-] and often start with
+        # '-'. Treat a well-formed ID as the operand, not an unknown flag.
+        # (2026-08-22: `-Gj0-EIyx6g` made every download tick UNHEALTHY.)
         -*)
+            if [[ "$1" =~ ^[A-Za-z0-9_-]{11}$ ]]; then
+                break
+            fi
             printf 'ingest-one: unknown flag: %s\n' "$1" >&2
             exit 2
             ;;

@@ -678,6 +678,17 @@ EOF
     [ -f "$ROOT/INFLIT-----/.transcript/transcript.raw.json" ]
 }
 
+@test "download tick fetches an id that starts with a dash" {
+    set_playlist "-Gj0-EIyx6g"
+
+    run_ingest --download
+
+    [ "$status" -eq 0 ]
+    [ -s "$ROOT/-Gj0-EIyx6g/.transcript/transcript.json" ]
+    [[ "$output" != *"unknown flag"* ]]
+    [[ "$output" != *"UNHEALTHY"* ]]
+}
+
 @test "download batch remainder is not reported as a failure" {
     set_playlist "BAT1------- BAT2------- BAT3-------"
     export YOUTUBE_INGEST_DOWNLOAD_BATCH=1

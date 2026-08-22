@@ -58,6 +58,26 @@ load lib
     ! grep -Fxq -- "VID005-----" "$ROOT/.processed" 2>/dev/null
 }
 
+@test "ingest-one --download accepts an id that starts with a dash" {
+    run_ingest_one --download -- -Gj0-EIyx6g
+
+    [ "$status" -eq 0 ]
+    [ -s "$ROOT/-Gj0-EIyx6g/.transcript/transcript.json" ]
+    [ -s "$ROOT/-Gj0-EIyx6g/meta.json" ]
+}
+
+# Live 2026-08-22: xargs invoked ingest-one --download -Gj0-EIyx6g (no --),
+# and the case arm treated the ID as an unknown flag. The -- test above
+# does not cover that path.
+@test "ingest-one --download accepts a dash-prefix id without --" {
+    run_ingest_one --download -Gj0-EIyx6g
+
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"unknown flag"* ]]
+    [ -s "$ROOT/-Gj0-EIyx6g/.transcript/transcript.json" ]
+    [ -s "$ROOT/-Gj0-EIyx6g/meta.json" ]
+}
+
 @test "ingest-one --download writes transcript and meta, not synopsis" {
     run_ingest_one --download VID007-----
 
