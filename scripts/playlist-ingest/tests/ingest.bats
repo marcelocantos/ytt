@@ -652,7 +652,7 @@ EOF
 
 @test "undownloadable ids are recorded once and not retried" {
     set_playlist "FAILID----- GOODID-----"
-    export MOCK_YTT_FAIL="FAILID-----"
+    export MOCK_YTT_NO_TRANSCRIPT="FAILID-----"
     export YOUTUBE_INGEST_DOWNLOAD_BATCH=16
 
     run_ingest --download
@@ -665,6 +665,27 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" != *"[FAILID-----] download start"* ]]
     [[ "$output" != *"UNHEALTHY"* ]]
+}
+
+@test "transient ytt failures are not recorded and are retried next tick" {
+    set_playlist "FAILID----- GOODID-----"
+    export MOCK_YTT_FAIL="FAILID-----"
+    export YOUTUBE_INGEST_DOWNLOAD_BATCH=16
+
+    run_ingest --download
+    [ "$status" -ne 0 ]
+    ! grep -Fxq -- "FAILID-----" "$ROOT/.download-failed" 2>/dev/null
+    [ -s "$ROOT/GOODID-----/.transcript/transcript.json" ]
+    [[ "$output" == *"UNHEALTHY"* ]]
+    [[ "$output" == *"failed this tick and stay pending"* ]]
+
+    run_ingest --download
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"UNHEALTHY"* ]]
+    [[ "$output" == *"failed this tick and stay pending"* ]]
+    ! grep -Fxq -- "FAILID-----" "$ROOT/.download-failed" 2>/dev/null
+    # Worker lines go to $ROOT/.ingest.log, not ingest.sh stdout.
+    [ "$(grep -c '\[FAILID-----\] download start' "$ROOT/.ingest.log")" -ge 2 ]
 }
 
 @test "playlist members-only ids are skipped at discovery, not downloaded" {

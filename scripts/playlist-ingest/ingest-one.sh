@@ -124,6 +124,27 @@ record_download_failed() {
     printf '%s\n' "$ID" >>"$FAILED_IDS"
 }
 
+# Genuine YouTube-side dead ends. IO races ("No such file"), empty
+# stderr, SIGPIPE, HTTP 429, and timeouts are not these — they retry
+# next tick instead of poisoning $ROOT/.download-failed.
+# Members-only is usually skipped at listing (T22); this still catches
+# hopper leftovers that never appear in this tick's browse.
+youtube_dead_end() {
+    grep -qiE 'no transcript available|TranscriptsDisabled|NoTranscriptFound|VideoUnavailable|VideoUnplayable|members-only|This video is private|Private video' <<<"$1"
+}
+
+fail_download() {
+    local reason="$1"
+    if youtube_dead_end "$reason"; then
+        log "$2; recording as undownloadable"
+        record_download_failed
+    else
+        log "$2; not recording — retry next tick"
+    fi
+    rm -rf "$DIR"
+    exit 1
+}
+
 do_download() {
     if download_complete; then
         log "already downloaded"
@@ -151,33 +172,29 @@ do_download() {
         fi
         printf '%s\n' "$err" >>"$LOG"
         attempt=$((attempt + 1))
-        if { (( rc != 124 )) && ! grep -qiE 'blocked|too ?many ?requests|429' <<<"$err"; } \
-            || (( attempt >= max_attempts )); then
-            log "ytt failed (rc=$rc); recording as undownloadable"
-            record_download_failed
-            rm -rf "$DIR"
-            exit 1
+        if youtube_dead_end "$err"; then
+            fail_download "$err" "ytt failed (rc=$rc): YouTube dead-end"
+        fi
+        if (( attempt >= max_attempts )); then
+            fail_download "$err" "ytt failed (rc=$rc) after $attempt attempt(s)"
         fi
         log "transcript fetch failed (rc=$rc); will retry ($attempt/$max_attempts) after the next pacing slot"
     done
 
     if ! jq . "$RAW" >"$DIR/.transcript/transcript.json"; then
-        log "transcript json malformed; recording as undownloadable"
-        record_download_failed
-        rm -rf "$DIR"
-        exit 1
+        fail_download "transcript json malformed" "transcript json malformed"
     fi
     rm -f "$RAW"
 
-    if ! with_timeout 120 yt-dlp --skip-download --print-json "$URL" 2>>"$LOG" \
+    META_ERR="$DIR/.transcript/meta.err"
+    if ! with_timeout 120 yt-dlp --skip-download --print-json "$URL" 2>"$META_ERR" \
         | jq '{id, title, uploader, channel, channel_id, upload_date,
                duration, view_count, description, webpage_url, tags}' \
         >"$DIR/meta.json"; then
-        log "meta fetch failed; recording as undownloadable"
-        record_download_failed
-        rm -rf "$DIR"
-        exit 1
+        cat "$META_ERR" >>"$LOG" 2>/dev/null || true
+        fail_download "$(cat "$META_ERR" 2>/dev/null || true)" "meta fetch failed"
     fi
+    rm -f "$META_ERR"
 
     TITLE=$(jq -r '.title // "(unknown)"' "$DIR/meta.json" 2>/dev/null || echo "(unknown)")
     log "downloaded ($TITLE)"

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Mock ytt. Emits a fake `--json` transcript payload (the shape ingest-one
-# feeds to jq) to stdout. Fails for IDs listed in MOCK_YTT_FAIL (comma-sep).
+# feeds to jq) to stdout.
+#   MOCK_YTT_FAIL           — generic failure (not a YouTube dead-end)
+#   MOCK_YTT_NO_TRANSCRIPT  — "no transcript available"
+#   MOCK_YTT_NO_SUCH_FILE   — IO race ("No such file or directory")
 
 set -e
 
@@ -84,6 +87,14 @@ id="${id%%&*}"
 
 if [[ ",${MOCK_YTT_FAIL:-}," == *",$id,"* ]]; then
     echo "mock ytt: forced failure for $id" >&2
+    exit 1
+fi
+if [[ ",${MOCK_YTT_NO_TRANSCRIPT:-}," == *",$id,"* ]]; then
+    echo "ytt: $id: no transcript available" >&2
+    exit 1
+fi
+if [[ ",${MOCK_YTT_NO_SUCH_FILE:-}," == *",$id,"* ]]; then
+    echo "ytt: $id: open $id/.transcript/transcript.raw.json: No such file or directory" >&2
     exit 1
 fi
 

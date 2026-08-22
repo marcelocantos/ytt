@@ -23,21 +23,38 @@ load lib
     ! grep -Fxq -- "VID006-----" "$ROOT/.processed" 2>/dev/null
 }
 
-@test "ingest-one: ytt failure removes the dir entirely" {
+@test "ingest-one: generic ytt failure removes the dir, does not ledger" {
     MOCK_YTT_FAIL="VID002-----" run_ingest_one VID002-----
 
     [ "$status" -ne 0 ]
     [ ! -e "$ROOT/VID002-----" ]
     ! grep -Fxq -- "VID002-----" "$ROOT/.processed" 2>/dev/null
-    grep -Fxq -- "VID002-----" "$ROOT/.download-failed"
+    ! grep -Fxq -- "VID002-----" "$ROOT/.download-failed" 2>/dev/null
 }
 
-@test "ingest-one: meta-fetch failure (pipefail) removes the dir" {
+@test "ingest-one: no-transcript is recorded as undownloadable" {
+    MOCK_YTT_NO_TRANSCRIPT="VIDNT0-----" run_ingest_one VIDNT0-----
+
+    [ "$status" -ne 0 ]
+    [ ! -e "$ROOT/VIDNT0-----" ]
+    grep -Fxq -- "VIDNT0-----" "$ROOT/.download-failed"
+}
+
+@test "ingest-one: No-such-file race does not ledger" {
+    MOCK_YTT_NO_SUCH_FILE="VIDIO0-----" run_ingest_one VIDIO0-----
+
+    [ "$status" -ne 0 ]
+    [ ! -e "$ROOT/VIDIO0-----" ]
+    ! grep -Fxq -- "VIDIO0-----" "$ROOT/.download-failed" 2>/dev/null
+}
+
+@test "ingest-one: meta-fetch failure (pipefail) removes the dir, does not ledger" {
     MOCK_YT_DLP_META_FAIL="VID003-----" run_ingest_one VID003-----
 
     [ "$status" -ne 0 ]
     [ ! -e "$ROOT/VID003-----" ]
     ! grep -Fxq -- "VID003-----" "$ROOT/.processed" 2>/dev/null
+    ! grep -Fxq -- "VID003-----" "$ROOT/.download-failed" 2>/dev/null
 }
 
 @test "ingest-one: synopsis failure keeps the download" {
