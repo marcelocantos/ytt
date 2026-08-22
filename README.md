@@ -16,17 +16,24 @@ brew install marcelocantos/tap/ytt
 
 ### From the GitHub release
 
-Each release attaches standalone binaries for macOS arm64, Linux x86_64,
-and Linux arm64. Download the tarball matching your platform from the
+Each release attaches a static Go binary plus the bundled `scripts/`
+tree for macOS arm64, Linux x86_64, and Linux arm64. Download the
+tarball matching your platform from the
 [releases page](https://github.com/marcelocantos/ytt/releases/latest),
-extract, and put `ytt` on your PATH.
+extract, put `ytt` on your PATH, and keep `scripts/` beside the binary
+(or in `../libexec/scripts/` relative to it).
 
 ### From source
 
-Requires Python 3.10+:
+Requires Go 1.26+. Clone the repo and build so `scripts/` stays next to
+the binary (`ytt ingest` and `ytt synopsis` resolve that tree at
+runtime; `go install` puts only the binary in `GOBIN` and those
+subcommands then fail):
 
 ```sh
-pipx install git+https://github.com/marcelocantos/ytt
+git clone https://github.com/marcelocantos/ytt
+cd ytt
+go build -o ytt .
 ```
 
 ## Usage
@@ -36,7 +43,7 @@ ytt dQw4w9WgXcQ                                  # raw video ID
 ytt https://www.youtube.com/watch?v=dQw4w9WgXcQ  # full URL
 ytt https://youtu.be/dQw4w9WgXcQ                 # short URL
 ytt --timestamps dQw4w9WgXcQ                     # one line per segment, [mm:ss] prefix
-ytt --json dQw4w9WgXcQ                           # full API payload as JSON
+ytt --json dQw4w9WgXcQ                           # transcript payload as JSON
 ytt <id1> <id2> <id3>                            # multiple videos, blank line between
 ```
 
@@ -57,7 +64,7 @@ With `--timestamps` (`-t`), each segment is on its own line:
 ...
 ```
 
-With `--json`, the full upstream payload is emitted — per-segment timing,
+With `--json`, the transcript payload is emitted — per-segment timing,
 language metadata, and the auto-generated flag — one compact JSON object
 per video (JSONL for multi-video):
 
@@ -83,7 +90,7 @@ ytt --json dQw4w9WgXcQ | jq .
 | Flag | Purpose |
 |---|---|
 | `-t`, `--timestamps` | Prefix each segment with `[mm:ss]` (or `[h:mm:ss]` for long videos), one per line |
-| `--json` | Emit the full API payload as JSON (one object per video, JSONL for multi). Mutually exclusive with `-t`. |
+| `-j`, `--json` | Emit the transcript payload as JSON (one object per video, JSONL for multi). Mutually exclusive with `-t`. |
 | `--version` | Print version |
 | `--help` | Print usage |
 | `--help-agent` | Extended help oriented toward AI/agent consumers |
@@ -131,6 +138,7 @@ $YOUTUBE_INGEST_ROOT/
 │   ├── meta.json                   # title, channel, upload date, duration, …
 │   └── <slug>.md                   # synopsis (Claudia: grok → claude → codex)
 ├── .processed                      # dedup state (one video ID per line)
+├── .download-failed                # IDs that failed transcript/meta fetch (skipped later)
 ├── .channels/<handle>              # per-channel cursor file
 ├── .ingest.log                     # append-only run log
 └── youtube-knowledge-base.md       # index, regenerated from the per-video files
@@ -239,28 +247,32 @@ later. Repeat suppression, `RECOVERED` notices and sink fallback all live in
 blurter — ytt deliberately implements none of it.
 
 Use `ytt ingest --dry-run` to run discovery and the health checks and print the
-queue without fetching transcripts, calling Claude, or reporting events.
+queue without fetching transcripts, running `ytt synopsis`, or reporting events.
 
 ### Runtime dependencies
 
-`ytt ingest` shells out to `yt-dlp`, `jq`, and `yq`; the synopsis step
-also runs `claude` (Claude Code CLI). The Homebrew formula declares
-`yt-dlp`, `jq`, and `yq` as `depends_on`; install `claude` separately
-via `npm i -g @anthropic-ai/claude-code` if you want synopses.
+`ytt` fetches captions with `yt-dlp`. `ytt ingest` also needs `jq`,
+`yq`, and GNU `timeout`/`gtimeout` (Homebrew `coreutils` on macOS).
+Synopses go through `ytt synopsis`, which runs a Claudia Task ladder
+(default `grok,claude,codex`) and writes the file itself — ingest does
+not shell out to `claude -p`. The Homebrew formula declares `yt-dlp`,
+`jq`, `yq`, `coreutils`, and `blurter` as `depends_on`. Provider CLIs
+(`grok`, `claude`, `codex`) are resolved by Claudia; pin `GROK_BIN` /
+`CLAUDE_BIN` / `CODEX_BIN` in scheduled runs.
 
-The bundled launchd plist pins both `ytt` and `claude` to absolute paths and
-fails the scheduled run if any discovered video does not land, so scheduler
-status reflects an incomplete ingest rather than a misleading successful exit.
+The bundled launchd plists pin `ytt` and those provider binaries to
+absolute paths. A scheduled run that does not land discovered videos is
+a failed run, not a successful empty tick.
 
 ## Requirements
 
-- Internet access to YouTube (the underlying library scrapes YouTube's
-  caption endpoints; YouTube occasionally changes these and breaks
-  transcript fetching until the library catches up)
-- Python 3.10+ only if installing from source; the Homebrew and
-  GitHub-release downloads bundle their own interpreter
-- For `ytt ingest`: `yt-dlp`, `jq`, `yq` on PATH (auto-installed via
-  Homebrew), plus optionally `claude` (npm) for synopsis generation
+- Internet access to YouTube (`yt-dlp` pulls caption tracks; YouTube
+  occasionally changes these and breaks fetching until yt-dlp catches up)
+- Go 1.26+ only if building from source; Homebrew and GitHub-release
+  downloads are a static binary plus the bundled `scripts/` tree
+- For `ytt ingest`: `yt-dlp`, `jq`, `yq`, and `timeout`/`gtimeout` on
+  PATH (auto-installed via Homebrew), plus at least one Claudia
+  provider CLI for synopsis generation
 
 ## License
 
