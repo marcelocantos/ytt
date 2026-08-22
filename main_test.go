@@ -10,6 +10,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -106,6 +107,34 @@ func TestHelpAgent(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("--help-agent output missing %q", want)
 		}
+	}
+}
+
+func TestShippedDocsAreNotTheRetiredPythonProduct(t *testing.T) {
+	cases := []struct {
+		path   string
+		banned []string
+	}{
+		{"README.md", []string{"pipx", "Python 3.", "youtube-transcript-api"}},
+		{"synopsis.go", []string{"youtube-transcript-api"}},
+	}
+	for _, tc := range cases {
+		body, err := os.ReadFile(tc.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, banned := range tc.banned {
+			if bytes.Contains(body, []byte(banned)) {
+				t.Errorf("%s still mentions retired product string %q", tc.path, banned)
+			}
+		}
+	}
+	stability, err := os.ReadFile("STABILITY.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if regexp.MustCompile(`(?i)pipx[^\n]*\|\s*Stable`).Match(stability) {
+		t.Error("STABILITY.md still claims pipx Stable")
 	}
 }
 

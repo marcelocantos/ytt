@@ -47,6 +47,9 @@ ytt --json dQw4w9WgXcQ                           # transcript payload as JSON
 ytt <id1> <id2> <id3>                            # multiple videos, blank line between
 ```
 
+If you use an agentic coding tool, include [`agents-guide.md`](agents-guide.md)
+in the project context, or run `ytt --help-agent`.
+
 Plain output joins all segments with spaces — convenient for piping into
 word counts, LLM prompts, or search tools:
 
@@ -93,7 +96,7 @@ ytt --json dQw4w9WgXcQ | jq .
 | `-j`, `--json` | Emit the transcript payload as JSON (one object per video, JSONL for multi). Mutually exclusive with `-t`. |
 | `--version` | Print version |
 | `--help` | Print usage |
-| `--help-agent` | Extended help oriented toward AI/agent consumers |
+| `--help-agent` | Extended help oriented toward AI/agent consumers (embeds [`agents-guide.md`](agents-guide.md)) |
 
 ## Subcommands
 
@@ -138,11 +141,26 @@ $YOUTUBE_INGEST_ROOT/
 │   ├── meta.json                   # title, channel, upload date, duration, …
 │   └── <slug>.md                   # synopsis (Claudia: grok → claude → codex)
 ├── .processed                      # dedup state (one video ID per line)
-├── .download-failed                # IDs that failed transcript/meta fetch (skipped later)
+├── .download-failed                # genuine YouTube dead-ends only (skipped later)
 ├── .channels/<handle>              # per-channel cursor file
 ├── .ingest.log                     # append-only run log
 └── youtube-knowledge-base.md       # index, regenerated from the per-video files
 ```
+
+`.download-failed` is a skip ledger, not a dump of every fetch error. Only
+genuine YouTube dead-ends are recorded: no captions (`TranscriptsDisabled` /
+`NoTranscriptFound`), members-only / unplayable, private, or
+`VideoUnavailable`. IO races (`No such file`), empty stderr, 429s, and
+timeouts retry on the next download tick and do not poison the ID.
+
+Members-only videos (`subscriber_only`, `unlisted_subscriber_only`,
+`premium_only`, `needs_auth`, `private`) are skipped at listing time — they
+never occupy a paced download slot. Hopper IDs that never appear in a listing
+this tick are still tried once.
+
+Video IDs may start with `-`. `ytt ingest` treats an 11-character
+`[A-Za-z0-9_-]` token as an ID, not a flag. Bare `ytt -Gj0-EIyx6g` is still
+parsed as flags by the Go CLI — pass a URL in that case.
 
 ### Configuration
 

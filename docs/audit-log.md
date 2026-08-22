@@ -111,3 +111,26 @@ maintenance activities. Append-only — newest entries at the bottom.
   the playlist-ingest env-var contract, and the on-disk knowledge-base
   layout, with stability annotations (Stable / Needs review / Fluid).
   Pre-1.0 — settling threshold not yet met.
+
+## 2026-07-31 — Port the ytt CLI to Go (landed on master as #26)
+
+- **Commit**: `a2e15a6`
+- **Outcome**: Replaced the Python/PyInstaller product with a static Go
+  binary (`github.com/marcelocantos/ytt`). `youtube-transcript-api` is
+  gone; captions come from `yt-dlp`. No `*.py` files remain. Homebrew
+  still served v0.11.0 (PyInstaller) until the next tag.
+
+## 2026-08-22 — /release v0.12.0
+
+- **Outcome**: First Go-binary release. Ingest is no longer `claude -p`:
+  `ytt synopsis` runs a Claudia Task ladder (default grok → claude →
+  Codex). `ytt build-index` is a Go subcommand. Download and analysis
+  are independent stages (`ytt ingest --download` paced, `--analyze`
+  unthrottled). `$ROOT/.download-failed` records only genuine YouTube
+  dead-ends; members-only is skipped at listing; dash-prefix IDs are
+  operands. Makefile exports `GOWORK=off` so `make test` is an oracle
+  next to the parent `go.work`. Docs test ratchets README/synopsis.go
+  off pipx / Python 3 / youtube-transcript-api.
+- **Showcase**: 🎯T16–T23, 🎯T20.2, 🎯T20.3, 🎯T20.9.
+- **Deferred**: json3 caption-event fixture (🎯T20.4); Crosshair nightly
+  (🎯T7); remaining entropy-audit children 🎯T20.1, T20.5–T20.8, T20.10.

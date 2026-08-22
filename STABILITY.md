@@ -13,8 +13,8 @@ get those right.
 
 ## Interaction surface
 
-Snapshot of this tree (`main.version` is 0.11.0; unreleased commits
-after the `v0.11.0` tag are included). ytt is a Go CLI
+Snapshot of this tree (`main.version` is 0.12.0; this is the `v0.12.0`
+release). ytt is a Go CLI
 (`github.com/marcelocantos/ytt`). `ytt ingest` execs the bundled bash
 workflow under `scripts/playlist-ingest/`. There is no Python package,
 pipx install path, or `claude -p` synopsis step.
@@ -147,16 +147,21 @@ URLs) are likely to land before 1.0.
 
 ## Gaps and prerequisites for 1.0
 
+Verification that already ships (do not re-plan as if it were missing):
+Go `-race` tests cover the CLI, JSON contract, `ytt synopsis` ladder, and
+`ytt build-index`; 73 bats cases cover ingest including bash 3.2 CI. The
+remaining gaps are schema and fixtures, not "only smoke checks exist".
+
 - **Knowledge-base index format**: the two-column layout shipped in
   v0.5.0 is the second iteration. Settle on a final schema before
   locking in. Parser tests exist (`index_test.go`,
   `build-index.bats`); the remaining work is the schema, not coverage.
 - **`YOUTUBE_INGEST_ROOT` default**: change from `~/think/knowledge/youtube`
   to a neutral default before 1.0.
-- **Network-independent transcript parse test**: CLI and JSON rendering
-  are tested against stubs. There is still no canned yt-dlp json3
-  fixture for the caption-event parser, so json3 shape drift is only
-  caught in production.
+- **Canned yt-dlp json3 fixture**: CLI and JSON rendering are tested
+  against stubs (`main_test.go`). There is still no fixture for the
+  caption-event parser, so json3 shape drift is only caught in production
+  (🎯T20.4).
 - **Provider CLIs for synopses**: `ytt synopsis` talks to Claudia;
   grok/claude/codex binaries are a runtime dependency of analyze, not
   of the Go module. Document which of the ladder must be present for

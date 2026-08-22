@@ -1,5 +1,8 @@
 ytt — YouTube transcript fetcher for CLI use.
 
+For an agentic coding tool, include this file in the project context or run
+`ytt --help-agent` (usage text, then this guide).
+
 Usage:
   ytt <video>                      plain transcript (single line, space-joined)
   ytt -t <video>                   one segment per line, prefixed with [mm:ss]
@@ -63,3 +66,10 @@ Agent tips:
     $YOUTUBE_INGEST_STALE_DAYS while channels are tracked is itself
     treated as a failure. Use `--dry-run` to inspect the resolved config
     and pending queue without fetching or spending.
+  - `$ROOT/.download-failed` records only genuine YouTube dead-ends (no
+    captions, members-only, private/unavailable). Transient IO, empty
+    stderr, 429, and timeouts retry and do not poison the ID. Members-only
+    (`subscriber_only` and kin) is skipped at listing so it never takes a
+    paced download slot.
+  - Video IDs may start with `-`. `ytt ingest` accepts them as operands.
+    Bare `ytt -XXXX` is still a flag to the Go CLI; pass a URL instead.

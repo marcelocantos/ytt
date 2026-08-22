@@ -1,4 +1,10 @@
 # Local build and test. Never pass -j; set MAKEFLAGS here if a project needs it.
+#
+# Parent ~/work/github.com/marcelocantos/go.work does not list this module, so
+# a bare `go test ./...` fails here with "directory prefix . does not contain
+# modules listed in go.work". CI has no parent workspace and is fine either
+# way; pin GOWORK off so `make test` is an oracle on this machine too.
+export GOWORK := off
 VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(patsubst v%,%,$(VERSION))
 

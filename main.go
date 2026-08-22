@@ -19,7 +19,7 @@ import (
 
 // version is overridden at build time via -ldflags "-X main.version=...".
 // The release workflow verifies it against the tag.
-var version = "0.11.0"
+var version = "0.12.0"
 
 //go:embed agents-guide.md
 var embedded embed.FS
@@ -29,7 +29,7 @@ var embedded embed.FS
 // network round trip.
 var fetch = Fetch
 
-const usage = `usage: ytt [-h] [-t | -j] [--help-agent] [VIDEO ...]
+const usage = `usage: ytt [-h] [-t | -j] [--version] [--help-agent] [VIDEO ...]
 
 Fetch YouTube video transcripts from the command line.
 
@@ -39,6 +39,7 @@ VIDEO may be a video ID or any YouTube URL (watch?v=, youtu.be/, /shorts/,
   -t, --timestamps   prefix each cue with [MM:SS]
   -j, --json         emit the full transcript payload as JSON (JSONL when
                      several videos are given)
+      --version      print version
       --help-agent   print the agent guide (usage text first)
   -h, --help         show this help
 

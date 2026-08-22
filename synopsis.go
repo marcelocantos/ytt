@@ -284,7 +284,7 @@ func slugify(title string) string {
 
 func buildSynopsisPrompt(dir, title, url, contract string) string {
 	transcript := filepath.Join(dir, ".transcript", "transcript.json")
-	return fmt.Sprintf(`Read the transcript at %s (YouTube video: %q, %s). The file is the full youtube-transcript-api payload: a JSON object with video_id, language, language_code, is_generated, and a snippets array of {text, start, duration}. Join snippet text in order for the prose; you may cite [mm:ss] timestamps (from snippet.start) in Key Takeaways when a moment is worth pinning to.
+	return fmt.Sprintf(`Read the transcript at %s (YouTube video: %q, %s). The file is ytt's public JSON transcript: a JSON object with video_id, language, language_code, is_generated, and a snippets array of {text, start, duration}. Join snippet text in order for the prose; you may cite [mm:ss] timestamps (from snippet.start) in Key Takeaways when a moment is worth pinning to.
 
 Produce a detailed synopsis and key takeaways for this video, following the output format defined below. Fill "<video title>" with %q and "<youtube URL>" with %s.
 
