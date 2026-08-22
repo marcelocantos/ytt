@@ -271,14 +271,16 @@ fi
 # refresh after real ingest (2026-08-16 → 08-19). Fail here, before
 # discovery, so the skew cannot hide behind hours of paced workers.
 ytt_help_has() {
-    local needle="$1" n=0
-    # A `go build -o ytt` can replace this file mid-tick and make --help
-    # empty for a moment. Retry once before treating it as the old
-    # Homebrew-Python skew.
+    local needle="$1" help n=0
+    # Do not `grep -q` a pipe: --help prints usage twice (stdout+stderr),
+    # grep -q closes early, ytt dies SIGPIPE 141, and `set -o pipefail`
+    # treats a successful match as a failed preflight — analyze then
+    # aborts UNHEALTHY "does not implement build-index".
     while (( n < 2 )); do
-        if "$YTT_BIN" --help 2>&1 | grep -q "$needle"; then
-            return 0
-        fi
+        help=$("$YTT_BIN" --help 2>&1) || true
+        case "$help" in
+            *"$needle"*) return 0 ;;
+        esac
         n=$((n + 1))
         sleep 1
     done
