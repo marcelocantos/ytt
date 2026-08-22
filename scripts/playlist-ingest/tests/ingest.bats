@@ -667,6 +667,56 @@ EOF
     [[ "$output" != *"UNHEALTHY"* ]]
 }
 
+@test "playlist members-only ids are skipped at discovery, not downloaded" {
+    set_playlist "PUB1------- MEM1------- PUB2-------"
+    export MOCK_YT_DLP_MEMBERS_ONLY="MEM1-------"
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"skipping subscriber_only MEM1------- at discovery"* ]]
+    grep -Fxq -- "MEM1-------" "$ROOT/.download-failed"
+    grep -Fxq -- "PUB1-------" "$ROOT/.processed"
+    grep -Fxq -- "PUB2-------" "$ROOT/.processed"
+    ! grep -Fxq -- "MEM1-------" "$ROOT/.processed"
+    [ ! -d "$ROOT/MEM1-------" ]
+    [[ "$output" != *"UNHEALTHY"* ]]
+    [[ "$output" != *"[MEM1-------] download start"* ]]
+}
+
+@test "channel feed members-only ids are skipped; cursor still advances over public" {
+    channels_with "@memchan"
+    set_channel memchan NEW1------- MEM2------- CURSOR-----
+    mark_processed "CURSOR-----"
+    set_cursor memchan "CURSOR-----"
+    export MOCK_YT_DLP_MEMBERS_ONLY="MEM2-------"
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    grep -Fxq -- "MEM2-------" "$ROOT/.download-failed"
+    grep -Fxq -- "NEW1-------" "$ROOT/.processed"
+    ! grep -Fxq -- "MEM2-------" "$ROOT/.processed"
+    [ ! -d "$ROOT/MEM2-------" ]
+    [ "$(cat "$ROOT/.channels/memchan")" = "NEW1-------" ]
+    [[ "$output" != *"[MEM2-------] download start"* ]]
+    [[ "$output" != *"UNHEALTHY"* ]]
+}
+
+@test "channel bootstrap whose latest upload is members-only starts at the newest public" {
+    channels_with "@newmem"
+    set_channel newmem MEM2------- BOOT1------
+    export MOCK_YT_DLP_MEMBERS_ONLY="MEM2-------"
+
+    run_ingest
+
+    [ "$status" -eq 0 ]
+    grep -Fxq -- "MEM2-------" "$ROOT/.download-failed"
+    grep -Fxq -- "BOOT1------" "$ROOT/.processed"
+    [ "$(cat "$ROOT/.channels/newmem")" = "BOOT1------" ]
+    [[ "$output" != *"[MEM2-------] download start"* ]]
+}
+
 @test "--analyze does not wipe a fresh incomplete download dir" {
     mkdir -p "$ROOT/INFLIT-----/.transcript"
     : > "$ROOT/INFLIT-----/.transcript/transcript.raw.json"

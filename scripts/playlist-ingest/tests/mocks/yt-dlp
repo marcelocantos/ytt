@@ -11,6 +11,8 @@
 #   MOCK_YT_DLP_CHANNEL_TRUNCATE   — "handle:N": that channel's feed emits
 #                                    its first N ids, then dies (exit 1)
 #   MOCK_YT_DLP_META_FAIL          — comma-separated IDs to fail meta for
+#   MOCK_YT_DLP_MEMBERS_ONLY       — space-separated IDs whose listing
+#                                    availability is subscriber_only
 
 set -e
 
@@ -18,9 +20,15 @@ set -e
 MODE=""
 URL=""
 PLAYLIST_END=""
+PRINT_FMT=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --flat-playlist|--lazy-playlist|--print|id|--playlist-reverse|--skip-download|--print-json)
+        --print)
+            PRINT_FMT="${2:-}"
+            shift
+            [[ $# -gt 0 ]] && shift
+            ;;
+        --flat-playlist|--lazy-playlist|--playlist-reverse|--skip-download|--print-json)
             shift
             ;;
         --playlist-end)
@@ -34,6 +42,17 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+emit_id() {
+    local id="$1" avail="NA"
+    case " ${MOCK_YT_DLP_MEMBERS_ONLY:-} " in
+        *" $id "*) avail="subscriber_only" ;;
+    esac
+    case "$PRINT_FMT" in
+        *availability*) printf '%s\t%s\n' "$id" "$avail" ;;
+        *) printf '%s\n' "$id" ;;
+    esac
+}
 
 # Re-scan original args via $@ — but we already shifted them. Use a
 # different strategy: reparse from "$@" string passed in via argv0 hack.
@@ -56,7 +75,7 @@ if [[ "$URL" == *playlist?list=* || "$URL" == *playlist*list=* ]]; then
         exit 1
     fi
     for id in ${MOCK_YT_DLP_PLAYLIST_IDS:-}; do
-        printf '%s\n' "$id"
+        emit_id "$id"
     done
 elif [[ "$URL" == *@*/videos* || "$URL" == */channel/*/videos* ]]; then
     # Channel feed.
@@ -72,7 +91,7 @@ elif [[ "$URL" == *@*/videos* || "$URL" == */channel/*/videos* ]]; then
         emitted=0
         for id in $ids; do
             (( emitted >= PLAYLIST_END )) && break
-            printf '%s\n' "$id"
+            emit_id "$id"
             emitted=$((emitted + 1))
         done
     else
@@ -86,7 +105,7 @@ elif [[ "$URL" == *@*/videos* || "$URL" == */channel/*/videos* ]]; then
                 echo "mock yt-dlp: feed truncated after $trunc ids for @$handle" >&2
                 exit 1
             fi
-            printf '%s\n' "$id"
+            emit_id "$id"
             emitted=$((emitted + 1))
         done
     fi

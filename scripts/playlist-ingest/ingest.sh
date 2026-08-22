@@ -140,6 +140,11 @@ RUN_TIMEOUT="${YOUTUBE_INGEST_RUN_TIMEOUT:-21600}"   # 6 hours
 # Safety limit on how deep into a channel feed we'll walk in one run.
 # Bounds the worst case when a cursor is stale or missing.
 CHANNEL_WALK_LIMIT=50
+# Channel/playlist browse already flags members-only as subscriber_only
+# without a player fetch. Discovery used to print only the id, so those
+# videos occupied a paced download slot and then failed. Tab-separated
+# so an 11-char id cannot collide with the availability token.
+LISTING_PRINT=$'%(id)s\t%(availability)s'
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 # Resolve the channels file from user config first and the install dir last —
@@ -186,6 +191,37 @@ download_complete() {
 
 download_rejected() {
     grep -Fxq -- "$1" "$FAILED_IDS" 2>/dev/null
+}
+
+record_undownloadable() {
+    grep -Fxq -- "$1" "$FAILED_IDS" 2>/dev/null && return 0
+    printf '%s\n' "$1" >>"$FAILED_IDS"
+}
+
+# Parse one yt-dlp --print '%(id)s\t%(availability)s' line into _id.
+# Returns 0 if the id should be queued. subscriber_only (and similar)
+# go to .download-failed and are not queued — hopper retries then skip
+# them too. Junk ids fall through to the existing charset filter.
+listing_ingestible() {
+    local line="$1" avail=""
+    [[ -n "$line" ]] || return 1
+    _id="${line%%$'\t'*}"
+    if [[ "$line" == *$'\t'* ]]; then
+        avail="${line#*$'\t'}"
+        avail="${avail%%$'\t'*}"
+    fi
+    case "$avail" in
+        subscriber_only|unlisted_subscriber_only|premium_only|needs_auth|private)
+            if [[ "$_id" =~ ^[A-Za-z0-9_-]{11}$ ]]; then
+                if ! grep -Fxq -- "$_id" "$FAILED_IDS" 2>/dev/null; then
+                    record_undownloadable "$_id"
+                    log "skipping $avail $_id at discovery"
+                fi
+            fi
+            return 1
+            ;;
+    esac
+    return 0
 }
 
 # IDs on disk that have a complete download and are not yet in .processed.
@@ -405,9 +441,10 @@ fi
 if [[ "$STAGE" != analyze ]]; then
 PLAYLIST_IDS=()
 PLAYLIST_LIST="$(mktemp)"
-if with_timeout 120 yt-dlp --flat-playlist --print id --playlist-reverse "$PLAYLIST" >"$PLAYLIST_LIST"; then
+if with_timeout 120 yt-dlp --flat-playlist --print "$LISTING_PRINT" --playlist-reverse "$PLAYLIST" >"$PLAYLIST_LIST"; then
     while IFS= read -r _line || [[ -n "$_line" ]]; do
-        PLAYLIST_IDS+=("$_line")
+        listing_ingestible "$_line" || continue
+        PLAYLIST_IDS+=("$_id")
     done <"$PLAYLIST_LIST"
 else
     rc=$?
@@ -475,14 +512,27 @@ if [[ -f "$CHANNELS_FILE" ]]; then
             # new channel added while the network was down used to kill every
             # scheduled run at bootstrap.
             rc=0
-            latest=$(with_timeout 120 yt-dlp --flat-playlist --playlist-end 1 --print id "$url" 2>/dev/null) || rc=$?
-            if (( rc != 0 )); then
-                DISCOVERY_FAILURES=$((DISCOVERY_FAILURES + 1))
-                note_issue "channel @$handle: feed fetch FAILED (rc=$rc); skipping this run"
-                continue
-            fi
+            latest=""
+            _boot_rc_file="$(mktemp)"
+            # Look past a members-only latest upload (playlist-end 1 would
+            # re-bootstrap the same undownloadable id every tick).
+            while IFS= read -r _line || [[ -n "$_line" ]]; do
+                listing_ingestible "$_line" || continue
+                latest="$_id"
+                break
+            done < <(with_timeout 120 yt-dlp --flat-playlist --playlist-end 20 --print "$LISTING_PRINT" "$url" 2>/dev/null; printf '%s' "$?" >"$_boot_rc_file")
+            rc="$(cat "$_boot_rc_file" 2>/dev/null || printf '1')"
+            rm -f "$_boot_rc_file"
             if [[ -z "$latest" ]]; then
-                log "channel @$handle: empty feed"
+                # Early break SIGPIPEs yt-dlp (141); that is success if we
+                # already picked a public id. Empty + real failure is a
+                # dead feed; empty + rc 0 is members-only all the way down.
+                if [[ "$rc" != 0 && "$rc" != 141 ]]; then
+                    DISCOVERY_FAILURES=$((DISCOVERY_FAILURES + 1))
+                    note_issue "channel @$handle: feed fetch FAILED (rc=$rc); skipping this run"
+                    continue
+                fi
+                log "channel @$handle: no public video in latest 20"
                 continue
             fi
             if grep -Fxq -- "$latest" "$STATE"; then
@@ -511,13 +561,15 @@ if [[ -f "$CHANNELS_FILE" ]]; then
         walked=0
         ended_early=false
         feed_rc_file="$(mktemp)"
-        while IFS= read -r ID; do
+        while IFS= read -r _line; do
             walked=$((walked + 1))
             (( walked > CHANNEL_WALK_LIMIT )) && { ended_early=true; break; }
+            listing_ingestible "$_line" || continue
+            ID="$_id"
             $cursor_trusted && [[ "$ID" == "$cursor" ]] && { ended_early=true; break; }
             grep -Fxq -- "$ID" "$STATE" && continue
             pending_for_channel+=("$ID")
-        done < <(with_timeout 120 yt-dlp --flat-playlist --lazy-playlist --print id "$url" 2>/dev/null; printf '%s' "$?" >"$feed_rc_file")
+        done < <(with_timeout 120 yt-dlp --flat-playlist --lazy-playlist --print "$LISTING_PRINT" "$url" 2>/dev/null; printf '%s' "$?" >"$feed_rc_file")
         feed_rc="$(cat "$feed_rc_file" 2>/dev/null || printf '1')"
         rm -f "$feed_rc_file"
 
