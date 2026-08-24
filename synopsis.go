@@ -159,6 +159,13 @@ func generateSynopsis(ctx context.Context, providers []string, prompt, workDir s
 	if last == nil {
 		last = errors.New("no synopsis provider produced a usable reply")
 	}
+	// A last-rung capacity miss must not leak *capacityError: cmdSynopsis
+	// maps that type to exit 255, and ingest-one aborts the rest of the
+	// analyze queue. Only a true all-available-capacity wall (above) may.
+	var cap *capacityError
+	if errors.As(last, &cap) {
+		last = fmt.Errorf("no usable synopsis; last provider %s hit capacity among mixed failures: %s", cap.Provider, cap.Msg)
+	}
 	return "", "", "", last
 }
 

@@ -97,6 +97,33 @@ func TestGenerateSynopsisAllCapacityIs255Shape(t *testing.T) {
 	}
 }
 
+func TestGenerateSynopsisMixedFailureLastCapacityIsNotCapacityError(t *testing.T) {
+	restore := runSynopsisProvider
+	t.Cleanup(func() { runSynopsisProvider = restore })
+	runSynopsisProvider = func(_ context.Context, provider, _, _ string) (string, error) {
+		switch provider {
+		case "grok":
+			return "I'll read the transcript first.\n\nnot a slug", nil
+		case "claude":
+			return "", errors.New("empty result")
+		default:
+			return "", &capacityError{Provider: provider, Msg: "usage limit"}
+		}
+	}
+	var stderr bytes.Buffer
+	_, _, _, err := generateSynopsis(context.Background(), []string{"grok", "claude", "codex"}, "p", t.TempDir(), &stderr)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var cap *capacityError
+	if errors.As(err, &cap) {
+		t.Fatalf("mixed failure leaked capacityError (would abort the analyze queue): %v", err)
+	}
+	if !strings.Contains(err.Error(), "mixed failures") {
+		t.Fatalf("err = %v, want mixed-failure wording", err)
+	}
+}
+
 func TestGenerateSynopsisSkipsMissingThenFailsNonCapacity(t *testing.T) {
 	restore := runSynopsisProvider
 	t.Cleanup(func() { runSynopsisProvider = restore })
@@ -194,6 +221,35 @@ func TestCmdSynopsisCapacityExit255(t *testing.T) {
 	}, &out, &errb)
 	if code != 255 {
 		t.Fatalf("exit %d, want 255 stderr=%s", code, errb.String())
+	}
+}
+
+func TestCmdSynopsisMixedFailureExit1(t *testing.T) {
+	restore := runSynopsisProvider
+	t.Cleanup(func() { runSynopsisProvider = restore })
+	runSynopsisProvider = func(_ context.Context, provider, _, _ string) (string, error) {
+		switch provider {
+		case "grok":
+			return "I'll read the transcript first.\n\nnot a slug", nil
+		case "claude":
+			return "", errors.New("empty result")
+		default:
+			return "", &capacityError{Provider: provider, Msg: "usage limit"}
+		}
+	}
+	dir := t.TempDir()
+	contract := filepath.Join(dir, "contract.md")
+	if err := os.WriteFile(contract, []byte("contract"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("YOUTUBE_SYNOPSIS_CONTRACT", contract)
+	var out, errb bytes.Buffer
+	code := cmdSynopsis([]string{
+		"--dir", dir, "--title", "T", "--url", "https://youtu.be/dQw4w9WgXcQ",
+		"--providers", "grok,claude,codex",
+	}, &out, &errb)
+	if code != 1 {
+		t.Fatalf("exit %d, want 1 (per-video fail, not 255 queue abort) stderr=%s", code, errb.String())
 	}
 }
 
