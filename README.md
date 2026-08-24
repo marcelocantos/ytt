@@ -250,7 +250,7 @@ event:
 - a discovery source failed (playlist or channel feed)
 - a channels config was orphaned (see above)
 - any queued video failed to ingest, or the run watchdog fired
-- every synopsis provider hit a capacity/spend/rate limit, so the run cut short
+- every available synopsis provider hit a capacity/spend/rate limit (`ytt synopsis` exit 255), so the analyze tick cut short; a mixed ladder failure (unusable or empty reply plus a last-rung capacity miss) fails that video only (exit 1) and does not abort the queue
 - the knowledge-base index failed to refresh
 - **nothing has been ingested for `YOUTUBE_INGEST_STALE_DAYS` days** while
   channels are tracked — the liveness backstop for "every step succeeded and yet

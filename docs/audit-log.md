@@ -120,6 +120,16 @@ maintenance activities. Append-only — newest entries at the bottom.
   gone; captions come from `yt-dlp`. No `*.py` files remain. Homebrew
   still served v0.11.0 (PyInstaller) until the next tag.
 
+## 2026-08-24 — /release v0.13.0
+
+- **Outcome**: Mixed synopsis-ladder failures no longer abort the rest of
+  the analyze queue. `ytt synopsis` exits 255 (and ingest reports
+  "providers at capacity") only when every available provider actually
+  hit a capacity/spend/rate limit. A last-rung capacity miss after
+  Grok/Claude non-capacity failures is per-video exit 1.
+- **Deferred**: Crosshair nightly (🎯T7, open PR #25); remaining
+  entropy-audit children including json3 fixture (🎯T20.4).
+
 ## 2026-08-22 — /release v0.12.0
 
 - **Outcome**: First Go-binary release. Ingest is no longer `claude -p`:

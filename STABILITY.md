@@ -13,7 +13,7 @@ get those right.
 
 ## Interaction surface
 
-Snapshot of this tree (`main.version` is 0.12.0; this is the `v0.12.0`
+Snapshot of this tree (`main.version` is 0.13.0; this is the `v0.13.0`
 release). ytt is a Go CLI
 (`github.com/marcelocantos/ytt`). `ytt ingest` execs the bundled bash
 workflow under `scripts/playlist-ingest/`. There is no Python package,
