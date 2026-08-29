@@ -13,7 +13,7 @@ get those right.
 
 ## Interaction surface
 
-Snapshot of this tree (`main.version` is 0.13.0; this is the `v0.13.0`
+Snapshot of this tree (`main.version` is 0.14.0; this is the `v0.14.0`
 release). ytt is a Go CLI
 (`github.com/marcelocantos/ytt`). `ytt ingest` execs the bundled bash
 workflow under `scripts/playlist-ingest/`. There is no Python package,
@@ -87,6 +87,7 @@ from on-disk synopses. `synopsis` runs a Claudia Task ladder (default
 | `YOUTUBE_INGEST_ROOT` | `~/think/knowledge/youtube` | Needs review |
 | `YOUTUBE_CHANNELS_FILE` | `$XDG_CONFIG_HOME/ytt/channels.yaml` | Needs review |
 | `YOUTUBE_INGEST_STALE_DAYS` | `7` | Needs review |
+| `YOUTUBE_INDEX_RECENT_DAYS` | `7` | Needs review |
 | `YOUTUBE_INGEST_STATE_DIR` | `$XDG_STATE_HOME/ytt` | Needs review |
 | `YOUTUBE_INGEST_QUEUE` | `$YOUTUBE_INGEST_STATE_DIR/backfill.ids` | Needs review |
 | `YOUTUBE_INGEST_BLURTER_BIN` | `blurter` (PATH) | Needs review |
