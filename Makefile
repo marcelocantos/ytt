@@ -37,8 +37,22 @@ bullseye: vet lint
 	@go build -o /dev/null . && echo "✓ builds"
 	@for f in scripts/playlist-ingest/*.sh; do /bin/bash -n "$$f" || exit 1; done; \
 		echo "✓ syntax, incl. macOS /bin/bash 3.2"
-	@test -z "$$(git status --porcelain)" && echo "✓ clean tree" || \
-		(echo "✗ dirty tree"; git status --short; exit 1)
+	@dirty=$$(git status --porcelain | grep -vE 'bullseye\.yaml$$' || true); \
+	if [ -z "$$dirty" ]; then echo "✓ working tree clean"; \
+	else \
+	  echo ""; \
+	  echo "================================================================"; \
+	  echo "⚠  DIRTY WORKING TREE"; \
+	  echo ""; \
+	  echo "Warning only — invariants still pass (exit 0)."; \
+	  echo "Look at the files below before starting a new target."; \
+	  echo "Leftover work from a different objective → park it in a commit first."; \
+	  echo "This session's WIP on the recommended target → continue."; \
+	  echo "================================================================"; \
+	  echo "$$dirty"; \
+	  echo "================================================================"; \
+	  echo ""; \
+	fi
 
 clean:
 	rm -f ytt

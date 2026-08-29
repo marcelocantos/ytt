@@ -105,7 +105,7 @@ ytt --json dQw4w9WgXcQ | jq .
 | `ytt ingest [PLAYLIST_URL]` | Download then analyze (two fan-outs) — see [Playlist ingest](#playlist-ingest) below |
 | `ytt ingest --download` | Paced YouTube fetch only (transcript + meta). Bounded per tick. |
 | `ytt ingest --analyze` | Unthrottled synopsis of on-disk downloads not yet in `.processed` |
-| `ytt build-index` | Regenerate `youtube-knowledge-base.md` from ingested synopses |
+| `ytt build-index` | Regenerate `youtube-knowledge-base.md` from recent ingested synopses (default: last 7 days of uploads) |
 | `ytt synopsis --dir DIR --title TITLE --url URL` | Write one video's synopsis via Claudia (grok → claude → codex) |
 
 ## Exit codes
@@ -177,6 +177,7 @@ parsed as flags by the Go CLI — pass a URL in that case.
 | `YOUTUBE_INGEST_LOG` | `$YOUTUBE_INGEST_ROOT/.ingest.log` | Ingest log path. Point it outside the content tree for scheduled runs. |
 | `YOUTUBE_INGEST_NETWORK_WAIT` | `14400` | Seconds to wait (awake-time) for connectivity before giving up — covers launchd ticks that fire in a no-network DarkWake window. |
 | `YOUTUBE_INGEST_STALE_DAYS` | `7` | Days of zero ingests (with channels tracked) before the run is judged unhealthy. `0` disables the check. |
+| `YOUTUBE_INDEX_RECENT_DAYS` | `7` | `ytt build-index` includes only videos whose YouTube upload date is on or after today minus this many days. `0` lists the full catalog. Older synopses stay on disk. |
 | `YOUTUBE_INGEST_STATE_DIR` | `~/.local/state/ytt` | Where the liveness stamp lives. Kept out of the content tree. |
 | `YOUTUBE_INGEST_QUEUE` | `$YOUTUBE_INGEST_STATE_DIR/backfill.ids` | Optional extra video-ID hopper (one ID per line). Deduped against `.processed` each run and drained by the same paced workers as the playlist. |
 | `YOUTUBE_INGEST_BLURTER_BIN` | `blurter` (PATH) | The blurter binary used to report events. Pin it in scheduled runs. |
@@ -249,7 +250,7 @@ event:
 - a preflight abort (missing `ytt`/`curl`, or network never returned)
 - a discovery source failed (playlist or channel feed)
 - a channels config was orphaned (see above)
-- any queued video failed to ingest, or the run watchdog fired
+- downloading itself is failing this tick (pending misses outnumber successful fetches, or nothing succeeded), or the run watchdog fired. A single ID that stays pending while neighbours download is video trouble, logged and retried, not an unhealthy run
 - every available synopsis provider hit a capacity/spend/rate limit (`ytt synopsis` exit 255), so the analyze tick cut short; a mixed ladder failure (unusable or empty reply plus a last-rung capacity miss) fails that video only (exit 1) and does not abort the queue
 - the knowledge-base index failed to refresh
 - **nothing has been ingested for `YOUTUBE_INGEST_STALE_DAYS` days** while

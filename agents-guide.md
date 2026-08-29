@@ -13,7 +13,7 @@ Usage:
   ytt ingest --download            paced YouTube fetch only
   ytt ingest --analyze             unthrottled synopsis of on-disk downloads
   ytt ingest --dry-run             report the queues without fetching or spending
-  ytt build-index                  regenerate youtube-knowledge-base.md
+  ytt build-index                  regenerate youtube-knowledge-base.md (recent uploads)
   ytt synopsis --dir DIR --title T --url URL
                                    write one synopsis via Claudia
                                    (ladder: grok → claude → codex)

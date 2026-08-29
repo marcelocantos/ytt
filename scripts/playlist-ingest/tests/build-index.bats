@@ -32,7 +32,7 @@ Body text here."
     grep -Fq "(AAAAAAAAAAA/first.md)" "$ROOT/youtube-knowledge-base.md"
 }
 
-@test "Caveat line renders under the TL;DR with a thumbs-down marker" {
+@test "legacy unmarked Caveat line renders under the TL;DR with 👎" {
     make_video FFFFFFFFFFF 20260101 "Caveated" caveated.md \
         "# Caveated
 
@@ -46,6 +46,34 @@ Body."
     [ "$status" -eq 0 ]
     grep -Fq '| The pitch.<br>👎 Founder marketing; central claim contested. |' \
         "$ROOT/youtube-knowledge-base.md"
+}
+
+@test "Caveat markers ⚠️ and 👎 are kept as written, including both" {
+    make_video GGGGGGGGGGG 20260102 "Cautioned" cautioned.md \
+        "# Cautioned
+
+**TL;DR**: A product walkthrough.
+
+**Caveat**: ⚠️ Founder marketing; treat the claims as a pitch.
+
+## Synopsis
+Body."
+    make_video HHHHHHHHHHH 20260103 "Both" both.md \
+        "# Both
+
+**TL;DR**: 10x productivity.
+
+**Caveat**: ⚠️ Founder pitch. 👎 The 10x claim is contradicted by METR.
+
+## Synopsis
+Body."
+    run_build
+    [ "$status" -eq 0 ]
+    grep -Fq '| A product walkthrough.<br>⚠️ Founder marketing; treat the claims as a pitch. |' \
+        "$ROOT/youtube-knowledge-base.md"
+    grep -Fq '| 10x productivity.<br>⚠️ Founder pitch. 👎 The 10x claim is contradicted by METR. |' \
+        "$ROOT/youtube-knowledge-base.md"
+    ! grep -Fq '<br>👎 ⚠️' "$ROOT/youtube-knowledge-base.md"
 }
 
 @test "legacy entry without TL;DR falls back to first synopsis sentence" {
@@ -71,6 +99,46 @@ Body."
     [ "$status" -eq 0 ]
     grep -Fq 'Title \| with pipe' "$ROOT/youtube-knowledge-base.md"
     grep -Fq 'Summary \| with \| pipes.' "$ROOT/youtube-knowledge-base.md"
+}
+
+@test "Scope heading states the full catalog and upload-date span" {
+    make_video OLDDATE0000 20120124 "Old" old.md \
+        "# Old
+**TL;DR**: old.
+## Synopsis
+x."
+    make_video NEWDATE0000 20260828 "New" new.md \
+        "# New
+**TL;DR**: new.
+## Synopsis
+x."
+    run_build
+    [ "$status" -eq 0 ]
+    grep -Fq '## Scope' "$ROOT/youtube-knowledge-base.md"
+    grep -Fq 'Every ingested synopsis in this tree (2 videos)' \
+        "$ROOT/youtube-knowledge-base.md"
+    grep -Fq '2012-01-24 through 2026-08-28' "$ROOT/youtube-knowledge-base.md"
+}
+
+@test "recent-days window omits older synopses from the index page" {
+    export YOUTUBE_INDEX_RECENT_DAYS=7
+    export YOUTUBE_INDEX_AS_OF=2026-08-29
+    make_video OLDDATE0000 20120124 "Old" old.md \
+        "# Old
+**TL;DR**: ancient catalog row.
+## Synopsis
+x."
+    make_video NEWDATE0000 20260828 "New" new.md \
+        "# New
+**TL;DR**: this weeks upload.
+## Synopsis
+x."
+    run_build
+    [ "$status" -eq 0 ]
+    grep -Fq 'this weeks upload.' "$ROOT/youtube-knowledge-base.md"
+    ! grep -Fq 'ancient catalog row.' "$ROOT/youtube-knowledge-base.md"
+    grep -Fq '1 of 2 ingested synopses' "$ROOT/youtube-knowledge-base.md"
+    grep -Fq 'last 7 days' "$ROOT/youtube-knowledge-base.md"
 }
 
 @test "rows are sorted newest-first by upload date" {

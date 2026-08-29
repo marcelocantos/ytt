@@ -807,6 +807,7 @@ if [[ "$STAGE" != analyze ]] && (( ${#TO_DOWNLOAD[@]} > 0 )); then
         note_issue "download watchdog fired: the fan-out exceeded ${RUN_TIMEOUT}s and was terminated"
     fi
     PERM_FAIL=0
+    PENDING_MISS_IDS=()
     for ID in ${TO_DOWNLOAD[@]+"${TO_DOWNLOAD[@]}"}; do
         if download_complete "$ID"; then
             DOWNLOADED=$((DOWNLOADED + 1))
@@ -814,6 +815,7 @@ if [[ "$STAGE" != analyze ]] && (( ${#TO_DOWNLOAD[@]} > 0 )); then
             PERM_FAIL=$((PERM_FAIL + 1))
         else
             DOWNLOAD_FAILED=$((DOWNLOAD_FAILED + 1))
+            PENDING_MISS_IDS+=("$ID")
         fi
     done
     log "downloaded $DOWNLOADED, $PERM_FAIL undownloadable, $DOWNLOAD_FAILED failed this tick"
@@ -821,11 +823,20 @@ if [[ "$STAGE" != analyze ]] && (( ${#TO_DOWNLOAD[@]} > 0 )); then
         log "recorded $PERM_FAIL undownloadable id(s); skipped on later ticks"
     fi
     if (( DOWNLOAD_FAILED > 0 )) && (( download_rc != 124 )); then
-        note_issue "$DOWNLOAD_FAILED of ${#TO_DOWNLOAD[@]} download(s) failed this tick and stay pending"
+        # Isolated misses (sticky livestream, one-ID 429) are video trouble,
+        # not pipeline trouble, when this tick also completed fetches. Page
+        # only when failures outnumber successes, or nothing succeeded —
+        # that is overall trouble downloading.
+        if (( DOWNLOADED > 0 )) && (( DOWNLOADED >= DOWNLOAD_FAILED )); then
+            log "$DOWNLOAD_FAILED isolated download miss(es) this tick (${PENDING_MISS_IDS[*]} stay pending); $DOWNLOADED succeeded — video trouble, not pipeline unhealthy"
+            download_rc=0
+        else
+            note_issue "$DOWNLOAD_FAILED of ${#TO_DOWNLOAD[@]} download(s) failed this tick and stay pending"
+        fi
     fi
     # ingest-one exits 1 for undownloadable ids so xargs records a failure;
-    # that is expected and already counted in PERM_FAIL. Do not let BSD
-    # xargs's non-zero status become a phantom "fan-out exited non-zero".
+    # that is expected and already counted in PERM_FAIL. Isolated pending
+    # misses are the same class: xargs is non-zero, the pipeline is not.
     if (( DOWNLOAD_FAILED == 0 )) && (( download_rc != 124 )); then
         download_rc=0
     fi
@@ -936,11 +947,10 @@ if (( INGESTED > 0 )); then
     fi
 fi
 
-# launchd has no knowledge of the per-worker log. A partial batch is not a
-# healthy run: return failure so its last-exit-code, and any future scheduler,
-# reflect the pending retry rather than falsely reporting success. The
-# run_rc term below is belt-and-braces: every other failure condition has
-# already called note_issue, so finish() fails the run on $ISSUES alone.
+# launchd has no knowledge of the per-worker log. A systemic download
+# miss already called note_issue. Isolated pending IDs are video trouble
+# and must not trip this belt-and-braces path (download_rc was cleared).
+# The run_rc term catches a fan-out that failed without a per-video count.
 if (( run_rc != 0 )) && (( ${#ISSUES[@]} == 0 )); then
     note_issue "fan-out exited non-zero (rc=$run_rc) with no per-video failure recorded"
 fi

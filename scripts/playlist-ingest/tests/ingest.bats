@@ -673,19 +673,49 @@ EOF
     export YOUTUBE_INGEST_DOWNLOAD_BATCH=16
 
     run_ingest --download
-    [ "$status" -ne 0 ]
+    [ "$status" -eq 0 ]
     ! grep -Fxq -- "FAILID-----" "$ROOT/.download-failed" 2>/dev/null
     [ -s "$ROOT/GOODID-----/.transcript/transcript.json" ]
-    [[ "$output" == *"UNHEALTHY"* ]]
-    [[ "$output" == *"failed this tick and stay pending"* ]]
+    [[ "$output" != *"UNHEALTHY"* ]]
+    [[ "$output" == *"video trouble, not pipeline unhealthy"* ]]
+    [[ "$(reported)" == *"send ok ytt ingest healthy"* ]]
+    [[ "$(reported)" != *problem* ]]
+
+    # A retry tick that only contains the sticky ID has no successful
+    # neighbour — that is the lone-miss case. Keep a new success in the
+    # batch so this still asserts "video trouble, pipeline fine".
+    set_playlist "FAILID----- GOODID----- NEXTGOOD---"
+    run_ingest --download
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"UNHEALTHY"* ]]
+    [[ "$output" == *"video trouble, not pipeline unhealthy"* ]]
+    [ -s "$ROOT/NEXTGOOD---/.transcript/transcript.json" ]
+    ! grep -Fxq -- "FAILID-----" "$ROOT/.download-failed" 2>/dev/null
+    # Worker lines go to $ROOT/.ingest.log, not ingest.sh stdout.
+    [ "$(grep -c '\[FAILID-----\] download start' "$ROOT/.ingest.log")" -ge 2 ]
+}
+
+@test "a lone download miss with no successful neighbour is pipeline unhealthy" {
+    set_playlist "ONLYFAIL---"
+    export MOCK_YTT_FAIL="ONLYFAIL---"
 
     run_ingest --download
     [ "$status" -ne 0 ]
     [[ "$output" == *"UNHEALTHY"* ]]
     [[ "$output" == *"failed this tick and stay pending"* ]]
-    ! grep -Fxq -- "FAILID-----" "$ROOT/.download-failed" 2>/dev/null
-    # Worker lines go to $ROOT/.ingest.log, not ingest.sh stdout.
-    [ "$(grep -c '\[FAILID-----\] download start' "$ROOT/.ingest.log")" -ge 2 ]
+    [[ "$(reported)" == *"send problem ytt ingest unhealthy"* ]]
+}
+
+@test "download misses that outnumber successes are pipeline unhealthy" {
+    set_playlist "FAIL1------ FAIL2------ GOODID-----"
+    export MOCK_YTT_FAIL="FAIL1------,FAIL2------"
+
+    run_ingest --download
+    [ "$status" -ne 0 ]
+    [ -s "$ROOT/GOODID-----/.transcript/transcript.json" ]
+    [[ "$output" == *"UNHEALTHY"* ]]
+    [[ "$output" == *"2 of 3 download(s) failed this tick and stay pending"* ]]
+    [[ "$(reported)" == *"send problem ytt ingest unhealthy"* ]]
 }
 
 @test "playlist members-only ids are skipped at discovery, not downloaded" {
