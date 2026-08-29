@@ -101,6 +101,46 @@ Body."
     grep -Fq 'Summary \| with \| pipes.' "$ROOT/youtube-knowledge-base.md"
 }
 
+@test "Scope heading states the full catalog and upload-date span" {
+    make_video OLDDATE0000 20120124 "Old" old.md \
+        "# Old
+**TL;DR**: old.
+## Synopsis
+x."
+    make_video NEWDATE0000 20260828 "New" new.md \
+        "# New
+**TL;DR**: new.
+## Synopsis
+x."
+    run_build
+    [ "$status" -eq 0 ]
+    grep -Fq '## Scope' "$ROOT/youtube-knowledge-base.md"
+    grep -Fq 'Every ingested synopsis in this tree (2 videos)' \
+        "$ROOT/youtube-knowledge-base.md"
+    grep -Fq '2012-01-24 through 2026-08-28' "$ROOT/youtube-knowledge-base.md"
+}
+
+@test "recent-days window omits older synopses from the index page" {
+    export YOUTUBE_INDEX_RECENT_DAYS=7
+    export YOUTUBE_INDEX_AS_OF=2026-08-29
+    make_video OLDDATE0000 20120124 "Old" old.md \
+        "# Old
+**TL;DR**: ancient catalog row.
+## Synopsis
+x."
+    make_video NEWDATE0000 20260828 "New" new.md \
+        "# New
+**TL;DR**: this weeks upload.
+## Synopsis
+x."
+    run_build
+    [ "$status" -eq 0 ]
+    grep -Fq 'this weeks upload.' "$ROOT/youtube-knowledge-base.md"
+    ! grep -Fq 'ancient catalog row.' "$ROOT/youtube-knowledge-base.md"
+    grep -Fq '1 of 2 ingested synopses' "$ROOT/youtube-knowledge-base.md"
+    grep -Fq 'last 7 days' "$ROOT/youtube-knowledge-base.md"
+}
+
 @test "rows are sorted newest-first by upload date" {
     make_video DDDDDDDDDDD 20260101 "Older" older.md \
         "# Older

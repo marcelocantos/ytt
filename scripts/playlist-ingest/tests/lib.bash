@@ -25,6 +25,10 @@ setup() {
     mkdir -p "$ROOT"
 
     export YOUTUBE_INGEST_ROOT="$ROOT"
+    # Index window is a production default; fixtures use historical
+    # upload dates, so tests opt into the full catalog unless they
+    # assert the recent-days filter themselves.
+    export YOUTUBE_INDEX_RECENT_DAYS=0
     export YOUTUBE_INGEST_PLAYLIST="https://example.test/playlist?list=TESTLIST"
     export YOUTUBE_INGEST_CONCURRENCY=2
     export YOUTUBE_CHANNELS_FILE="$BATS_TEST_TMPDIR/channels.yaml"
