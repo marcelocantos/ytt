@@ -32,7 +32,7 @@ Body text here."
     grep -Fq "(AAAAAAAAAAA/first.md)" "$ROOT/youtube-knowledge-base.md"
 }
 
-@test "Caveat line renders under the TL;DR with a thumbs-down marker" {
+@test "legacy unmarked Caveat line renders under the TL;DR with 👎" {
     make_video FFFFFFFFFFF 20260101 "Caveated" caveated.md \
         "# Caveated
 
@@ -46,6 +46,34 @@ Body."
     [ "$status" -eq 0 ]
     grep -Fq '| The pitch.<br>👎 Founder marketing; central claim contested. |' \
         "$ROOT/youtube-knowledge-base.md"
+}
+
+@test "Caveat markers ⚠️ and 👎 are kept as written, including both" {
+    make_video GGGGGGGGGGG 20260102 "Cautioned" cautioned.md \
+        "# Cautioned
+
+**TL;DR**: A product walkthrough.
+
+**Caveat**: ⚠️ Founder marketing; treat the claims as a pitch.
+
+## Synopsis
+Body."
+    make_video HHHHHHHHHHH 20260103 "Both" both.md \
+        "# Both
+
+**TL;DR**: 10x productivity.
+
+**Caveat**: ⚠️ Founder pitch. 👎 The 10x claim is contradicted by METR.
+
+## Synopsis
+Body."
+    run_build
+    [ "$status" -eq 0 ]
+    grep -Fq '| A product walkthrough.<br>⚠️ Founder marketing; treat the claims as a pitch. |' \
+        "$ROOT/youtube-knowledge-base.md"
+    grep -Fq '| 10x productivity.<br>⚠️ Founder pitch. 👎 The 10x claim is contradicted by METR. |' \
+        "$ROOT/youtube-knowledge-base.md"
+    ! grep -Fq '<br>👎 ⚠️' "$ROOT/youtube-knowledge-base.md"
 }
 
 @test "legacy entry without TL;DR falls back to first synopsis sentence" {

@@ -131,6 +131,25 @@ func TestEscapePipes(t *testing.T) {
 	}
 }
 
+func TestFormatIndexCaveatHonoursMarkers(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"", ""},
+		{"Founder marketing.", "<br>👎 Founder marketing."},
+		{"⚠️ Founder marketing.", "<br>⚠️ Founder marketing."},
+		{"⚠ Treat as pitch.", "<br>⚠ Treat as pitch."},
+		{"👎 The 10x claim is contradicted.", "<br>👎 The 10x claim is contradicted."},
+		{"⚠️ Founder pitch. 👎 The 10x claim is contradicted.", "<br>⚠️ Founder pitch. 👎 The 10x claim is contradicted."},
+		{"  ⚠️ Sponsored.  ", "<br>⚠️ Sponsored."},
+	}
+	for _, c := range cases {
+		if got := formatIndexCaveat(c.in); got != c.want {
+			t.Errorf("formatIndexCaveat(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 func TestChannelFallsBackToUploaderThenDash(t *testing.T) {
 	if got := channelOf(videoMeta{Channel: "c", Uploader: "u"}); got != "c" {
 		t.Errorf("got %q, want the channel", got)

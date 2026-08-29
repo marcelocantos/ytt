@@ -30,10 +30,22 @@ Source: <youtube URL>
 so a reader scanning a list of TL;DRs can decide whether to open this one.
 Single line, no line breaks.>
 
-**Caveat**: <optional — present exactly when the Critique section below
-is. The one-line headline warning a table reader needs before trusting
-the TL;DR (e.g. "Founder marketing; the central claim is contradicted by
-X."). Single line, no line breaks.>
+**Caveat**: <optional — present when a table reader must discount the
+TL;DR or know a material objection exists. Starts with ⚠️ and/or 👎,
+then the one-line headline. Single line, no line breaks. Omit the
+line when neither applies.
+
+  ⚠️  caution — incentives, sponsorship, founder pitch, preliminary or
+      anecdotal evidence, "treat as opinion". The content may still be
+      sound. Does not require a Critique section.
+  👎  critique — factual errors, claims contradicted by well-established
+      knowledge or data, load-bearing arguments with weak support.
+      Requires a Critique section below.
+
+  Use one marker, or both when both apply (caution first):
+  **Caveat**: ⚠️ Founder marketing; treat the product claims as a pitch.
+  **Caveat**: 👎 The 10x productivity claim is contradicted by METR.
+  **Caveat**: ⚠️ Founder pitch. 👎 The 10x claim is contradicted by METR.>
 
 ## Synopsis
 
@@ -47,11 +59,10 @@ substance to fit a budget.>
 
 ## Critique
 
-<Optional — include only when critical review finds material problems:
-factual errors, claims contradicted by well-established knowledge or
-data, undisclosed or structural conflicts of interest (founder
-marketing, sponsorship), or load-bearing arguments with weak support.
-Not a venue for nitpicks; omit the section when the content is sound.
+<Optional — include only when 👎 applies: material problems with
+claims. Incentives, sponsorship, and "treat as pitch" alone are ⚠️ on
+the Caveat line, not a Critique section. Not a venue for nitpicks;
+omit the section when the claims are sound.
 
 Open with a sentence on the speaker's vantage point and incentives when
 relevant. Then one bullet per disputed claim, counterpoint attached:>
@@ -88,9 +99,12 @@ The file is named `<slug>.md`, one synopsis file per video directory:
   missing line falls back to the first sentence of the `## Synopsis`
   section.
 - The Caveat line, when present, is prefixed **exactly** with
-  `**Caveat**: ` and lives on a single line. `ytt build-index` extracts
-  the first such line and renders it in the index table under the
-  TL;DR, marked 👎. A missing line renders nothing.
+  `**Caveat**: ` and lives on a single line. The remainder starts with
+  ⚠️ and/or 👎 (caution first when both apply). `ytt build-index`
+  extracts the first such line and renders it under the TL;DR. If the
+  remainder already begins with ⚠️ or 👎, the markers are kept as
+  written; a legacy unmarked line is prefixed 👎. A missing line
+  renders nothing.
 - The synopsis file is the single `*.md` in the video directory whose
   name does not start with `transcript`. `ytt build-index` and
   `ingest-one.sh` both locate it that way.

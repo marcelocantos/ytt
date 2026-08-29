@@ -142,7 +142,7 @@ func collectRows(root string) ([]indexRow, error) {
 		}
 		cell := escapePipes(tldr)
 		if caveat != "" {
-			cell += "<br>👎 " + escapePipes(caveat)
+			cell += formatIndexCaveat(caveat)
 		}
 		row := fmt.Sprintf("| **[%s](%s/%s)** ([yt](%s))<br>%s<br>%s · %s | %s |",
 			escapePipes(meta.Title), id, slug, url,
@@ -260,6 +260,21 @@ func formatDate(d string) string {
 // escapePipes keeps a cell from breaking the markdown table.
 func escapePipes(s string) string {
 	return strings.ReplaceAll(s, "|", `\|`)
+}
+
+// formatIndexCaveat renders a Caveat remainder under the TL;DR. New
+// synopses start the remainder with ⚠️ and/or 👎; those are kept as
+// written. A legacy unmarked line (Caveat-iff-Critique era) is prefixed
+// 👎 so existing entries do not change meaning.
+func formatIndexCaveat(caveat string) string {
+	s := strings.TrimSpace(caveat)
+	if s == "" {
+		return ""
+	}
+	if strings.HasPrefix(s, "⚠") || strings.HasPrefix(s, "👎") {
+		return "<br>" + escapePipes(s)
+	}
+	return "<br>👎 " + escapePipes(s)
 }
 
 // extractTLDR pulls the summary out of a synopsis: the first **TL;DR**: line,
