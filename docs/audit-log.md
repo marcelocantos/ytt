@@ -144,3 +144,14 @@ maintenance activities. Append-only — newest entries at the bottom.
 - **Showcase**: 🎯T16–T23, 🎯T20.2, 🎯T20.3, 🎯T20.9.
 - **Deferred**: json3 caption-event fixture (🎯T20.4); Crosshair nightly
   (🎯T7); remaining entropy-audit children 🎯T20.1, T20.5–T20.8, T20.10.
+
+## 2026-08-29 — /release v0.14.0
+
+- **Outcome**: Synopsis Caveat lines mark ⚠️ caution vs 👎 critique (or
+  both); `ytt build-index` lists only the last 7 days of uploads
+  (`YOUTUBE_INDEX_RECENT_DAYS`, `0` = full catalog) and states that
+  window in a Scope heading. Isolated download misses no longer mark
+  the ingest tick unhealthy when neighbours succeeded.
+- **Deferred**: Crosshair nightly (🎯T7); remaining entropy-audit
+  children including json3 fixture (🎯T20.4). Claude Task print-mode
+  prompt swallowed by variadic `--disallowedTools` is Claudia 🎯T49.
