@@ -98,7 +98,7 @@ from on-disk synopses. `synopsis` runs a Claudia Task ladder (default
 | `YOUTUBE_INGEST_RUN_TIMEOUT` | `21600` | Needs review |
 | `YOUTUBE_INGEST_NETWORK_WAIT` | `14400` | Needs review |
 | `YOUTUBE_INGEST_NETWORK_POLL` | `60` | Needs review |
-| `YOUTUBE_INGEST_FETCH_INTERVAL_MIN` / `_MAX` | `180` / `420` | Needs review |
+| `YOUTUBE_INGEST_FETCH_INTERVAL_MIN`, `YOUTUBE_INGEST_FETCH_INTERVAL_MAX` | `180` / `420` | Needs review |
 | `YOUTUBE_INGEST_FETCH_RETRIES` | `3` | Needs review |
 | `YOUTUBE_INGEST_LOG` | `$YOUTUBE_INGEST_ROOT/.ingest.log` | Needs review |
 | `YOUTUBE_INGEST_YTT_BIN` | `ytt` (PATH) | Stable |

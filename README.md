@@ -187,7 +187,7 @@ parsed as flags by the Go CLI — pass a URL in that case.
 | `YOUTUBE_INGEST_NETWORK_POLL` | `60` | Seconds between connectivity probes while waiting for the network. |
 | `YOUTUBE_INGEST_RUN_TIMEOUT` | `21600` | Watchdog cap in seconds on each fan-out (download and analyze are capped separately). An expired fan-out is killed and reported; unfinished videos retry next tick. `0` disables. |
 | `YOUTUBE_INGEST_ORPHAN_MIN` | `60` | The download-stage sweep of incomplete video directories leaves alone any directory modified within this many minutes, so an in-flight fetch is not reclaimed mid-pacing. `0` sweeps regardless of age. |
-| `YOUTUBE_INGEST_FETCH_INTERVAL_MIN` / `_MAX` | `180` / `420` | Bounds of the random delay between consecutive YouTube requests, shared across download workers. |
+| `YOUTUBE_INGEST_FETCH_INTERVAL_MIN`, `YOUTUBE_INGEST_FETCH_INTERVAL_MAX` | `180` / `420` | Bounds of the random delay between consecutive YouTube requests, shared across download workers. |
 | `YOUTUBE_INGEST_FETCH_RETRIES` | `3` | Transcript fetch attempts per video per download tick. A genuine YouTube dead-end stops retrying at once and goes to `.download-failed`. |
 | `YOUTUBE_SYNOPSIS_CONTRACT` | bundled `synopsis-contract.md` | Alternative path to the synopsis format contract that `ytt synopsis` appends to the provider prompt. |
 | `YOUTUBE_INDEX_AS_OF` | today | `YYYY-MM-DD` that `ytt build-index` treats as today when computing the recent-days window (for reproducible output; tests use it). |
