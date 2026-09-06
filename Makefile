@@ -8,19 +8,26 @@ export GOWORK := off
 VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(patsubst v%,%,$(VERSION))
 
-.PHONY: all build test test-go test-scripts vet lint bullseye clean
+.PHONY: all build test test-go test-docs test-scripts vet lint bullseye clean
 
 all: vet test build
 
 build:
 	go build -trimpath -ldflags "$(LDFLAGS)" -o ytt .
 
-# Full local suite: Go unit tests plus the bats shell tests that still cover
-# the ingest pipeline.
-test: test-go test-scripts
+# Full local suite: Go unit tests, the README/source config ratchet, and the
+# bats shell tests that still cover the ingest pipeline.
+test: test-go test-docs test-scripts
 
 test-go:
 	go test ./... -count=1 -race
+
+# The doc ratchet: every YOUTUBE_*/YTT_* name in the Go and shell sources must
+# have a row in the README configuration table. test-go already runs it as an
+# ordinary Go test; naming it here keeps the gate visible in `make test` and
+# gives a fast standalone invocation while editing docs.
+test-docs:
+	go test -run TestReadmeDocumentsEveryEnvVarInTheSources -count=1 .
 
 # Depends on build: parts of the pipeline are Go subcommands, and a stale
 # binary would silently test the wrong thing.
