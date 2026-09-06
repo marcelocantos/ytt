@@ -301,7 +301,7 @@ if ! YTT_BIN="$(command -v "$YTT_BIN")"; then
     die "ytt executable not found: ${YOUTUBE_INGEST_YTT_BIN:-ytt}; aborting"
 fi
 # ingest.sh calls `$YTT_BIN build-index` after a successful pass. A binary
-# that does not implement that subcommand (Homebrew 0.11.0 is still the
+# that does not implement that subcommand (Homebrew 0.11.0 was still the
 # Python CLI) treats the token as a video ID, fetches it, and reports
 # `ytt: build-index: VideoUnavailable` — three nights of UNHEALTHY index
 # refresh after real ingest (2026-08-16 → 08-19). Fail here, before

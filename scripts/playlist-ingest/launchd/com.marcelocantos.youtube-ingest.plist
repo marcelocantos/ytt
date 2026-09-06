@@ -10,8 +10,8 @@
 
   Design notes:
   - Pins ProgramArguments and YOUTUBE_INGEST_YTT_BIN to the Go ytt at
-    ~/.local/bin/ytt (a symlink onto the checkout binary). Homebrew 0.11.0 is
-    still the Python CLI and has no `build-index` subcommand: pointing the
+    ~/.local/bin/ytt (a symlink onto the checkout binary). Homebrew 0.11.0 was
+    still the Python CLI with no `build-index` subcommand: pointing the
     scheduler at /opt/homebrew/bin/ytt made every successful pass log
     `ytt: build-index: VideoUnavailable` and UNHEALTHY (2026-08-16 → 08-19).
     Claudia resolves grok/claude/codex from PATH plus their known install

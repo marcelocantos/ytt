@@ -1,8 +1,9 @@
 # Shared setup for playlist-ingest bats tests.
 #
 # Each test gets its own isolated ROOT under $BATS_TEST_TMPDIR and a
-# PATH that prepends $TESTS_DIR/mocks so yt-dlp / ytt / claude /
-# build-index.sh are all stubbed.
+# PATH that prepends $TESTS_DIR/mocks so yt-dlp, curl and blurter are
+# stubbed. The `ytt` mock wraps the real Go binary (built by `make build`)
+# and injects synopsis/transcript failures via MOCK_* knobs.
 
 setup() {
     SCRIPT_DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." && pwd)"

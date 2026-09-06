@@ -2,9 +2,11 @@
 
 Fetch YouTube video transcripts from the command line.
 
-A thin wrapper around [`yt-dlp`](https://github.com/jdepoix/yt-dlp)
-that extracts video IDs from URLs, handles multiple videos, and optionally
-prefixes each segment with a timestamp.
+A static Go binary that wraps [`yt-dlp`](https://github.com/yt-dlp/yt-dlp):
+it extracts video IDs from URLs, handles multiple videos, and optionally
+prefixes each segment with a timestamp. The same binary drives a bulk
+playlist/channel ingest pipeline that writes transcripts and LLM synopses
+into a local knowledge base (see [Playlist ingest](#playlist-ingest)).
 
 ## Install
 
@@ -42,6 +44,7 @@ go build -o ytt .
 ytt dQw4w9WgXcQ                                  # raw video ID
 ytt https://www.youtube.com/watch?v=dQw4w9WgXcQ  # full URL
 ytt https://youtu.be/dQw4w9WgXcQ                 # short URL
+ytt https://youtube.com/shorts/dQw4w9WgXcQ        # shorts and /embed/ URLs too
 ytt --timestamps dQw4w9WgXcQ                     # one line per segment, [mm:ss] prefix
 ytt --json dQw4w9WgXcQ                           # transcript payload as JSON
 ytt <id1> <id2> <id3>                            # multiple videos, blank line between
@@ -94,7 +97,7 @@ ytt --json dQw4w9WgXcQ | jq .
 |---|---|
 | `-t`, `--timestamps` | Prefix each segment with `[mm:ss]` (or `[h:mm:ss]` for long videos), one per line |
 | `-j`, `--json` | Emit the transcript payload as JSON (one object per video, JSONL for multi). Mutually exclusive with `-t`. |
-| `--version` | Print version |
+| `-V`, `--version` | Print version |
 | `--help` | Print usage |
 | `--help-agent` | Extended help oriented toward AI/agent consumers (embeds [`agents-guide.md`](agents-guide.md)) |
 
@@ -181,6 +184,14 @@ parsed as flags by the Go CLI — pass a URL in that case.
 | `YOUTUBE_INGEST_STATE_DIR` | `~/.local/state/ytt` | Where the liveness stamp lives. Kept out of the content tree. |
 | `YOUTUBE_INGEST_QUEUE` | `$YOUTUBE_INGEST_STATE_DIR/backfill.ids` | Optional extra video-ID hopper (one ID per line). Deduped against `.processed` each run and drained by the same paced workers as the playlist. |
 | `YOUTUBE_INGEST_BLURTER_BIN` | `blurter` (PATH) | The blurter binary used to report events. Pin it in scheduled runs. |
+| `YOUTUBE_INGEST_NETWORK_POLL` | `60` | Seconds between connectivity probes while waiting for the network. |
+| `YOUTUBE_INGEST_RUN_TIMEOUT` | `21600` | Watchdog cap in seconds on each fan-out (download and analyze are capped separately). An expired fan-out is killed and reported; unfinished videos retry next tick. `0` disables. |
+| `YOUTUBE_INGEST_ORPHAN_MIN` | `60` | The download-stage sweep of incomplete video directories leaves alone any directory modified within this many minutes, so an in-flight fetch is not reclaimed mid-pacing. `0` sweeps regardless of age. |
+| `YOUTUBE_INGEST_FETCH_INTERVAL_MIN` / `_MAX` | `180` / `420` | Bounds of the random delay between consecutive YouTube requests, shared across download workers. |
+| `YOUTUBE_INGEST_FETCH_RETRIES` | `3` | Transcript fetch attempts per video per download tick. A genuine YouTube dead-end stops retrying at once and goes to `.download-failed`. |
+| `YOUTUBE_SYNOPSIS_CONTRACT` | bundled `synopsis-contract.md` | Alternative path to the synopsis format contract that `ytt synopsis` appends to the provider prompt. |
+| `YOUTUBE_INDEX_AS_OF` | today | `YYYY-MM-DD` that `ytt build-index` treats as today when computing the recent-days window (for reproducible output; tests use it). |
+| `YTT_YT_DLP_BIN` | `yt-dlp` (PATH) | The yt-dlp executable used by `ytt <video>` transcript fetches. The ingest scripts call `yt-dlp` from PATH directly for playlist listing and metadata. |
 
 ### Scheduling
 

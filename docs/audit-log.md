@@ -120,18 +120,9 @@ maintenance activities. Append-only — newest entries at the bottom.
   gone; captions come from `yt-dlp`. No `*.py` files remain. Homebrew
   still served v0.11.0 (PyInstaller) until the next tag.
 
-## 2026-08-24 — /release v0.13.0
-
-- **Outcome**: Mixed synopsis-ladder failures no longer abort the rest of
-  the analyze queue. `ytt synopsis` exits 255 (and ingest reports
-  "providers at capacity") only when every available provider actually
-  hit a capacity/spend/rate limit. A last-rung capacity miss after
-  Grok/Claude non-capacity failures is per-video exit 1.
-- **Deferred**: Crosshair nightly (🎯T7, open PR #25); remaining
-  entropy-audit children including json3 fixture (🎯T20.4).
-
 ## 2026-08-22 — /release v0.12.0
 
+- **Commit**: `b985d1a`
 - **Outcome**: First Go-binary release. Ingest is no longer `claude -p`:
   `ytt synopsis` runs a Claudia Task ladder (default grok → claude →
   Codex). `ytt build-index` is a Go subcommand. Download and analysis
@@ -145,8 +136,20 @@ maintenance activities. Append-only — newest entries at the bottom.
 - **Deferred**: json3 caption-event fixture (🎯T20.4); Crosshair nightly
   (🎯T7); remaining entropy-audit children 🎯T20.1, T20.5–T20.8, T20.10.
 
+## 2026-08-24 — /release v0.13.0
+
+- **Commit**: `235814e`
+- **Outcome**: Mixed synopsis-ladder failures no longer abort the rest of
+  the analyze queue. `ytt synopsis` exits 255 (and ingest reports
+  "providers at capacity") only when every available provider actually
+  hit a capacity/spend/rate limit. A last-rung capacity miss after
+  Grok/Claude non-capacity failures is per-video exit 1.
+- **Deferred**: Crosshair nightly (🎯T7, open PR #25); remaining
+  entropy-audit children including json3 fixture (🎯T20.4).
+
 ## 2026-08-29 — /release v0.14.0
 
+- **Commit**: `dc9798b`
 - **Outcome**: Synopsis Caveat lines mark ⚠️ caution vs 👎 critique (or
   both); `ytt build-index` lists only the last 7 days of uploads
   (`YOUTUBE_INDEX_RECENT_DAYS`, `0` = full catalog) and states that

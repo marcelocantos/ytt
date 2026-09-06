@@ -95,8 +95,17 @@ from on-disk synopses. `synopsis` runs a Claudia Task ladder (default
 | `YOUTUBE_INGEST_ANALYZE_CONCURRENCY` | same as download | Needs review |
 | `YOUTUBE_INGEST_DOWNLOAD_BATCH` | `16` | Needs review |
 | `YOUTUBE_INGEST_ORPHAN_MIN` | `60` | Needs review |
+| `YOUTUBE_INGEST_RUN_TIMEOUT` | `21600` | Needs review |
+| `YOUTUBE_INGEST_NETWORK_WAIT` | `14400` | Needs review |
+| `YOUTUBE_INGEST_NETWORK_POLL` | `60` | Needs review |
+| `YOUTUBE_INGEST_FETCH_INTERVAL_MIN` / `_MAX` | `180` / `420` | Needs review |
+| `YOUTUBE_INGEST_FETCH_RETRIES` | `3` | Needs review |
+| `YOUTUBE_INGEST_LOG` | `$YOUTUBE_INGEST_ROOT/.ingest.log` | Needs review |
 | `YOUTUBE_INGEST_YTT_BIN` | `ytt` (PATH) | Stable |
 | `YOUTUBE_INGEST_SYNOPSIS_PROVIDERS` | `grok,claude,codex` | Needs review |
+| `YOUTUBE_SYNOPSIS_CONTRACT` | bundled `synopsis-contract.md` | Needs review |
+| `YOUTUBE_INDEX_AS_OF` | today | Needs review |
+| `YTT_YT_DLP_BIN` (transcript CLI) | `yt-dlp` (PATH) | Needs review |
 
 The default `YOUTUBE_INGEST_ROOT` of `~/think/knowledge/youtube` is
 personal-vault-shaped and likely to move to something neutral
@@ -150,7 +159,7 @@ URLs) are likely to land before 1.0.
 
 Verification that already ships (do not re-plan as if it were missing):
 Go `-race` tests cover the CLI, JSON contract, `ytt synopsis` ladder, and
-`ytt build-index`; 73 bats cases cover ingest including bash 3.2 CI. The
+`ytt build-index`; 78 bats cases cover ingest including bash 3.2 CI. The
 remaining gaps are schema and fixtures, not "only smoke checks exist".
 
 - **Knowledge-base index format**: the two-column layout shipped in
@@ -165,8 +174,11 @@ remaining gaps are schema and fixtures, not "only smoke checks exist".
   (🎯T20.4).
 - **Provider CLIs for synopses**: `ytt synopsis` talks to Claudia;
   grok/claude/codex binaries are a runtime dependency of analyze, not
-  of the Go module. Document which of the ladder must be present for
-  a scheduled run.
+  of the Go module. Any rung whose CLI is missing or not logged in is
+  skipped as unavailable; at least one rung must be installed and
+  authenticated or every synopsis fails (exit 1, "no synopsis provider
+  produced a usable reply"). Whether that contract is stable enough for
+  1.0 is still open.
 
 ## Out of scope for 1.0
 

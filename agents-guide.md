@@ -23,6 +23,7 @@ Accepted input forms:
   https://www.youtube.com/watch?v=dQw4w9WgXcQ
   https://youtu.be/dQw4w9WgXcQ
   https://youtube.com/shorts/dQw4w9WgXcQ
+  https://www.youtube.com/embed/dQw4w9WgXcQ
 
 Output:
   Transcript text goes to stdout. Errors go to stderr, one line per failure,
