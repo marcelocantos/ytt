@@ -8,7 +8,7 @@ export GOWORK := off
 VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(patsubst v%,%,$(VERSION))
 
-.PHONY: all build test test-go test-scripts vet lint gate bullseye clean
+.PHONY: all build test test-go test-scripts vet lint gate hooks bullseye clean
 
 all: vet test build
 
@@ -16,6 +16,12 @@ all: vet test build
 # a push to master is allowed. Same oracles CI runs, minus the bash-3.2 leg
 # (that needs a real macOS runner with /bin/bash 3.2; it stays CI-only).
 gate: vet lint test build
+
+# Once per clone. A relative core.hooksPath resolves against the worktree the
+# push runs from, so one setting covers every `git worktree`.
+hooks:
+	git config core.hooksPath scripts/hooks
+	@echo "core.hooksPath=$$(git config core.hooksPath)"
 
 build:
 	go build -trimpath -ldflags "$(LDFLAGS)" -o ytt .
