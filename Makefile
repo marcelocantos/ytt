@@ -8,9 +8,14 @@ export GOWORK := off
 VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(patsubst v%,%,$(VERSION))
 
-.PHONY: all build test test-go test-scripts vet lint bullseye clean
+.PHONY: all build test test-go test-scripts vet lint gate bullseye clean
 
 all: vet test build
+
+# The delivery gate: everything `scripts/hooks/pre-push` must see green before
+# a push to master is allowed. Same oracles CI runs, minus the bash-3.2 leg
+# (that needs a real macOS runner with /bin/bash 3.2; it stays CI-only).
+gate: vet lint test build
 
 build:
 	go build -trimpath -ldflags "$(LDFLAGS)" -o ytt .
