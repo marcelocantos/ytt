@@ -63,7 +63,7 @@ func cmdSynopsis(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	prompt := buildSynopsisPrompt(*dir, *title, *url, contract)
-	providers := parseProviderLadder(*providersFlag)
+	providers := resolveSynopsisProviders(context.Background(), *providersFlag)
 	if len(providers) == 0 {
 		fmt.Fprintln(stderr, "ytt: synopsis: empty provider ladder")
 		return 2
@@ -87,6 +87,53 @@ func cmdSynopsis(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stderr, "synopsis via %s → %s\n", used, slug)
 	fmt.Fprintln(stdout, slug)
 	return 0
+}
+
+// resolveSynopsisProviders is the 🎯T61.5 seam. An explicit flag or
+// YOUTUBE_INGEST_SYNOPSIS_PROVIDERS list still wins. The default path
+// asks Claudia Resolve (Task + PreferPlan + PreferProvider=grok) and
+// walks ExcludeProviders so capacity fall-through stays a host loop.
+// Cursor is excluded: claudiaProvider only speaks grok/claude/codex.
+var resolveSynopsis = defaultResolveSynopsis
+
+func defaultResolveSynopsis(ctx context.Context, pred claudia.ModelPredicates) (claudia.ModelPick, error) {
+	return claudia.Resolve(ctx, pred)
+}
+
+var loadSynopsisPlanUsage = defaultLoadSynopsisPlanUsage
+
+func defaultLoadSynopsisPlanUsage(ctx context.Context) ([]claudia.PlanUsage, error) {
+	return claudia.LoadPlanUsage(ctx, &claudia.PlanUsageCacheArgs{})
+}
+
+func resolveSynopsisProviders(ctx context.Context, flagVal string) []string {
+	if flagVal != "" || os.Getenv("YOUTUBE_INGEST_SYNOPSIS_PROVIDERS") != "" {
+		return parseProviderLadder(flagVal)
+	}
+	usage, err := loadSynopsisPlanUsage(ctx)
+	if err != nil || usage == nil {
+		usage = []claudia.PlanUsage{}
+	}
+	var out []string
+	exclude := []claudia.Provider{claudia.ProviderCursor}
+	for range 6 {
+		got, err := resolveSynopsis(ctx, claudia.ModelPredicates{
+			Mode:             claudia.CapabilityTask,
+			PreferPlan:       true,
+			PreferProvider:   claudia.ProviderGrok,
+			ExcludeProviders: exclude,
+			Usage:            usage,
+		})
+		if err != nil {
+			break
+		}
+		out = append(out, string(got.Provider))
+		exclude = append(exclude, got.Provider)
+	}
+	if len(out) == 0 {
+		return parseProviderLadder("")
+	}
+	return out
 }
 
 func parseProviderLadder(flagVal string) []string {

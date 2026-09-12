@@ -173,7 +173,7 @@ parsed as flags by the Go CLI — pass a URL in that case.
 | `YOUTUBE_INGEST_ANALYZE_CONCURRENCY` | same as download | Parallel analyze workers (no YouTube pacing). |
 | `YOUTUBE_INGEST_DOWNLOAD_BATCH` | `16` | Max videos fetched per download tick. Remainder waits for the next tick. `0` disables. |
 | `YOUTUBE_INGEST_YTT_BIN` | `ytt` (PATH) | Absolute path to the `ytt` used for transcript fetches and `ytt synopsis`. Pin it in scheduled runs so launchd and your shell can't resolve two different builds. |
-| `YOUTUBE_INGEST_SYNOPSIS_PROVIDERS` | `grok,claude,codex` | Claudia Task ladder for synopses. Capacity/spend/rate-limit on one provider falls through to the next. |
+| `YOUTUBE_INGEST_SYNOPSIS_PROVIDERS` | *(unset)* | Explicit Claudia Task ladder for synopses (e.g. `grok,claude,codex`). Unset, `ytt` asks Claudia to resolve the ladder from plan usage (`Resolve`: Task mode, plan capacity, Grok first) and skips providers that are hot or exhausted. Capacity/spend/rate-limit on one provider still falls through to the next. |
 | `YOUTUBE_INGEST_LOG` | `$YOUTUBE_INGEST_ROOT/.ingest.log` | Ingest log path. Point it outside the content tree for scheduled runs. |
 | `YOUTUBE_INGEST_NETWORK_WAIT` | `14400` | Seconds to wait (awake-time) for connectivity before giving up — covers launchd ticks that fire in a no-network DarkWake window. |
 | `YOUTUBE_INGEST_STALE_DAYS` | `7` | Days of zero ingests (with channels tracked) before the run is judged unhealthy. `0` disables the check. |
@@ -278,6 +278,13 @@ not shell out to `claude -p`. The Homebrew formula declares `yt-dlp`,
 `jq`, `yq`, `coreutils`, and `blurter` as `depends_on`. Provider CLIs
 (`grok`, `claude`, `codex`) are resolved by Claudia; pin `GROK_BIN` /
 `CLAUDE_BIN` / `CODEX_BIN` in scheduled runs.
+
+When the claudia daemon is installed (`claudia broker install`), `ytt`
+does not spawn provider processes or query vendor usage endpoints
+itself: plan usage is read from the daemon's snapshot and each synopsis
+Task runs on the daemon over its Unix socket. Without a daemon (or with
+`CLAUDIA_NO_BROKER=1`) `ytt` behaves as before — direct spawn, and plan
+usage from the host-wide cache under `~/Library/Caches/claudia`.
 
 The bundled launchd plists pin `ytt` and those provider binaries to
 absolute paths. A scheduled run that does not land discovered videos is

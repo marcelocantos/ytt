@@ -19,6 +19,8 @@ build:
 # the ingest pipeline.
 test: test-go test-scripts
 
+# Hermetic: never reach a claudia daemon installed on this machine.
+test-go: export CLAUDIA_NO_BROKER = 1
 test-go:
 	go test ./... -count=1 -race
 

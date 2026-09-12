@@ -11,6 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/marcelocantos/claudia"
 )
 
 func TestParseSynopsisReplySlugThenBody(t *testing.T) {
@@ -259,5 +262,77 @@ func TestParseProviderLadderDefault(t *testing.T) {
 	want := []string{"grok", "claude", "codex"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("got %v", got)
+	}
+}
+
+func TestResolveSynopsisProvidersFlagWins(t *testing.T) {
+	orig := resolveSynopsis
+	t.Cleanup(func() { resolveSynopsis = orig })
+	resolveSynopsis = func(context.Context, claudia.ModelPredicates) (claudia.ModelPick, error) {
+		t.Fatal("Resolve must not run when --providers / env is set")
+		return claudia.ModelPick{}, errors.New("unused")
+	}
+	got := resolveSynopsisProviders(context.Background(), "claude,codex")
+	if strings.Join(got, ",") != "claude,codex" {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestResolveSynopsisProvidersDefaultWalksGrokThenClaudeThenCodex(t *testing.T) {
+	t.Setenv("YOUTUBE_INGEST_SYNOPSIS_PROVIDERS", "")
+	origRes := resolveSynopsis
+	origLoad := loadSynopsisPlanUsage
+	t.Cleanup(func() {
+		resolveSynopsis = origRes
+		loadSynopsisPlanUsage = origLoad
+	})
+	loadSynopsisPlanUsage = func(context.Context) ([]claudia.PlanUsage, error) {
+		return []claudia.PlanUsage{}, nil
+	}
+	resolveSynopsis = defaultResolveSynopsis
+	got := resolveSynopsisProviders(context.Background(), "")
+	if strings.Join(got, ",") != "grok,claude,codex" {
+		t.Fatalf("unpublished usage must keep SuperGrok-first catalog walk, got %v", got)
+	}
+}
+
+func TestResolveSynopsisProvidersSkipsHotGrok(t *testing.T) {
+	t.Setenv("YOUTUBE_INGEST_SYNOPSIS_PROVIDERS", "")
+	origRes := resolveSynopsis
+	origLoad := loadSynopsisPlanUsage
+	t.Cleanup(func() {
+		resolveSynopsis = origRes
+		loadSynopsisPlanUsage = origLoad
+	})
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	week := now.Add(3*24*time.Hour + 12*time.Hour)
+	pct := func(v float64) *float64 { return &v }
+	loadSynopsisPlanUsage = func(context.Context) ([]claudia.PlanUsage, error) {
+		return []claudia.PlanUsage{
+			{
+				Provider: claudia.ProviderGrok,
+				Status:   claudia.PlanUsageAvailable,
+				Windows: []claudia.PlanWindow{{
+					Name:             claudia.PlanWindowWeekly,
+					RemainingPercent: pct(20),
+					UsedPercent:      pct(80),
+					ResetsAt:         &week,
+					LimitWindow:      7 * 24 * time.Hour,
+				}},
+			},
+			{Provider: claudia.ProviderClaude, Status: claudia.PlanUsageUnavailable, Reason: "unpublished"},
+			{Provider: claudia.ProviderCodex, Status: claudia.PlanUsageUnavailable, Reason: "unpublished"},
+		}, nil
+	}
+	resolveSynopsis = func(ctx context.Context, pred claudia.ModelPredicates) (claudia.ModelPick, error) {
+		pred.Now = now
+		return defaultResolveSynopsis(ctx, pred)
+	}
+	got := resolveSynopsisProviders(context.Background(), "")
+	if len(got) == 0 || got[0] == "grok" {
+		t.Fatalf("hot Grok must not lead the ladder, got %v", got)
+	}
+	if got[0] != "claude" {
+		t.Fatalf("want claude first after hot grok, got %v", got)
 	}
 }
