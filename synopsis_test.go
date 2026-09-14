@@ -39,6 +39,18 @@ func TestParseSynopsisReplyHeadingFallback(t *testing.T) {
 	}
 }
 
+func TestFormatSynopsisPickIncludesEffort(t *testing.T) {
+	if got := formatSynopsisPick(testPick("grok", "grok-4.6")); got != "grok/grok-4.6" {
+		t.Fatalf("no effort: %s", got)
+	}
+	got := formatSynopsisPick(claudia.ModelPick{
+		Provider: claudia.ProviderGrok, Model: "grok-4.6", Effort: claudia.ModelEffortHigh,
+	})
+	if got != "grok/grok-4.6/high" {
+		t.Fatalf("with effort: %s", got)
+	}
+}
+
 func TestParseSynopsisReplyRejectsMissingTLDR(t *testing.T) {
 	_, _, err := parseSynopsisReply("topic.md\n\n# Title\n\nno tldr here\n")
 	if err == nil {
@@ -48,6 +60,32 @@ func TestParseSynopsisReplyRejectsMissingTLDR(t *testing.T) {
 
 func testPick(provider, model string) claudia.ModelPick {
 	return claudia.ModelPick{Provider: claudia.Provider(provider), Model: model}
+}
+
+// generalIntel is a hermetic purpose-quality series. Scores and research
+// costs are arranged so grok-4.6/high is cheapest standard general, and
+// sonnet/high is the next remaining pick after Grok is weekly-hot.
+func generalIntel() *claudia.ModelIntelArgs {
+	return &claudia.ModelIntelArgs{
+		Latest: []claudia.ModelObservation{
+			{Generation: "grok-4.6", Effort: claudia.ModelEffortHigh, Purpose: claudia.ModelPurposeGeneral, Value: 80, CostUSD: 0.05},
+			{Generation: "grok-4.5", Effort: claudia.ModelEffortHigh, Purpose: claudia.ModelPurposeGeneral, Value: 62, CostUSD: 0.04},
+			{Generation: "claude-sonnet-5", Effort: claudia.ModelEffortHigh, Purpose: claudia.ModelPurposeGeneral, Value: 72, CostUSD: 0.10},
+			{Generation: "claude-opus-5", Effort: claudia.ModelEffortHigh, Purpose: claudia.ModelPurposeGeneral, Value: 90, CostUSD: 0.50},
+			{Generation: "claude-haiku-4-5", Effort: claudia.ModelEffortUnspecified, Purpose: claudia.ModelPurposeGeneral, Value: 35, CostUSD: 0.01},
+			{Generation: "gpt-5-codex", Effort: claudia.ModelEffortHigh, Purpose: claudia.ModelPurposeGeneral, Value: 68, CostUSD: 0.30},
+			{Generation: "composer-2.5", Effort: claudia.ModelEffortUnspecified, Purpose: claudia.ModelPurposeGeneral, Value: 58, CostUSD: 0.20},
+		},
+	}
+}
+
+func withPurposeIntel(resolve func(context.Context, claudia.ModelPredicates) (claudia.ModelPick, error)) func(context.Context, claudia.ModelPredicates) (claudia.ModelPick, error) {
+	return func(ctx context.Context, pred claudia.ModelPredicates) (claudia.ModelPick, error) {
+		if pred.Intel == nil {
+			pred.Intel = generalIntel()
+		}
+		return resolve(ctx, pred)
+	}
 }
 
 func TestGenerateSynopsisRunsTheResolvedPickOnce(t *testing.T) {
@@ -251,7 +289,7 @@ func TestResolveSynopsisPickDefaultAsksForStandardQuality(t *testing.T) {
 	var seen claudia.ModelPredicates
 	resolveSynopsis = func(_ context.Context, pred claudia.ModelPredicates) (claudia.ModelPick, error) {
 		seen = pred
-		return defaultResolveSynopsis(context.Background(), pred)
+		return withPurposeIntel(defaultResolveSynopsis)(context.Background(), pred)
 	}
 	got, err := resolveSynopsisPick(context.Background(), "")
 	if err != nil {
@@ -260,11 +298,17 @@ func TestResolveSynopsisPickDefaultAsksForStandardQuality(t *testing.T) {
 	if seen.PreferProvider != "" {
 		t.Fatalf("default must not name a vendor, PreferProvider=%s", seen.PreferProvider)
 	}
+	if seen.Purpose != claudia.ModelPurposeGeneral {
+		t.Fatalf("Purpose = %s, want general", seen.Purpose)
+	}
 	if seen.Quality != claudia.ModelQualityStandard {
 		t.Fatalf("Quality = %s, want standard", seen.Quality)
 	}
 	if got.Quality != claudia.ModelQualityStandard {
 		t.Fatalf("pick must be standard intelligence, got %s/%s (%s)", got.Provider, got.Model, got.Quality)
+	}
+	if got.Purpose != claudia.ModelPurposeGeneral || got.Effort == "" {
+		t.Fatalf("pick must carry purpose-quality outputs, got %+v", got)
 	}
 }
 
@@ -298,7 +342,7 @@ func TestResolveSynopsisPickSkipsHotGrok(t *testing.T) {
 	}
 	resolveSynopsis = func(ctx context.Context, pred claudia.ModelPredicates) (claudia.ModelPick, error) {
 		pred.Now = now
-		return defaultResolveSynopsis(ctx, pred)
+		return withPurposeIntel(defaultResolveSynopsis)(ctx, pred)
 	}
 	got, err := resolveSynopsisPick(context.Background(), "")
 	if err != nil {
@@ -334,8 +378,40 @@ func TestResolveSynopsisPickDefaultDoesNotExcludeCursor(t *testing.T) {
 	if len(seen.ExcludeProviders) != 0 {
 		t.Fatalf("default pick must not hard-exclude providers, got %v", seen.ExcludeProviders)
 	}
-	if seen.PreferProvider != "" || seen.Quality != claudia.ModelQualityStandard {
-		t.Fatalf("default predicates: prefer=%q quality=%s", seen.PreferProvider, seen.Quality)
+	if seen.PreferProvider != "" || seen.Quality != claudia.ModelQualityStandard || seen.Purpose != claudia.ModelPurposeGeneral {
+		t.Fatalf("default predicates: prefer=%q quality=%s purpose=%s", seen.PreferProvider, seen.Quality, seen.Purpose)
+	}
+}
+
+func TestResolveSynopsisPickFallsBackWithoutIntelSeries(t *testing.T) {
+	t.Setenv("YOUTUBE_INGEST_SYNOPSIS_PROVIDERS", "")
+	t.Setenv("CLAUDIA_MODEL_INTEL", t.TempDir())
+	origRes := resolveSynopsis
+	origLoad := loadSynopsisPlanUsage
+	t.Cleanup(func() {
+		resolveSynopsis = origRes
+		loadSynopsisPlanUsage = origLoad
+	})
+	loadSynopsisPlanUsage = func(context.Context) ([]claudia.PlanUsage, error) {
+		return []claudia.PlanUsage{}, nil
+	}
+	var purposes []claudia.ModelPurpose
+	resolveSynopsis = func(_ context.Context, pred claudia.ModelPredicates) (claudia.ModelPick, error) {
+		purposes = append(purposes, pred.Purpose)
+		if pred.Purpose != "" {
+			return claudia.ModelPick{}, errors.New("resolve: no catalog model matches predicates")
+		}
+		return testPick("claude", "claude-sonnet-5"), nil
+	}
+	got, err := resolveSynopsisPick(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(purposes) != 2 || purposes[0] != claudia.ModelPurposeGeneral || purposes[1] != "" {
+		t.Fatalf("want general then catalog retry, got %v", purposes)
+	}
+	if got.Provider != claudia.ProviderClaude {
+		t.Fatalf("catalog fallback pick %s", got.Provider)
 	}
 }
 

@@ -16,7 +16,7 @@ Usage:
   ytt build-index                  regenerate youtube-knowledge-base.md (recent uploads)
   ytt synopsis --dir DIR --title T --url URL
                                    write one synopsis via Claudia
-                                   (Resolve: Task + plan + standard quality)
+                                   (Resolve: Task + plan + general purpose + standard floor)
 
 Accepted input forms:
   dQw4w9WgXcQ                      raw 11-character video ID

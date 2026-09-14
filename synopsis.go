@@ -88,8 +88,9 @@ func cmdSynopsis(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// resolveSynopsis is the 🎯T61.5 seam. Claudia Resolve picks one model
-// from predicates (Task + plan + standard quality + token availability).
+// resolveSynopsis is the 🎯T61.5 seam. Claudia Resolve picks one
+// (generation, effort) pair from purpose-quality predicates (Task +
+// plan + general purpose + standard floor + token availability).
 // ytt does not name a vendor and does not walk a host ladder.
 // --providers / YOUTUBE_INGEST_SYNOPSIS_PROVIDERS is a preference (one
 // name) or allowlist (several names), not fall-through.
@@ -119,14 +120,23 @@ func resolveSynopsisPick(ctx context.Context, flagVal string) (claudia.ModelPick
 	if err != nil || usage == nil {
 		usage = []claudia.PlanUsage{}
 	}
-	pick, err := resolveSynopsis(ctx, claudia.ModelPredicates{
+	pred := claudia.ModelPredicates{
 		Mode:             claudia.CapabilityTask,
+		Purpose:          claudia.ModelPurposeGeneral,
 		Quality:          claudia.ModelQualityStandard,
 		PreferPlan:       true,
 		PreferProvider:   prefer,
 		ExcludeProviders: exclude,
 		Usage:            usage,
-	})
+	}
+	pick, err := resolveSynopsis(ctx, pred)
+	if err != nil && !synopsisHasGeneralIntel(pred.Intel) {
+		// Purpose-quality needs a series. Until AA ingest has written
+		// one, empty Purpose keeps the catalog-shelf path so analyze
+		// does not abort every tick.
+		pred.Purpose = ""
+		pick, err = resolveSynopsis(ctx, pred)
+	}
 	if err != nil {
 		if strings.Contains(err.Error(), "no catalog model matches") {
 			return claudia.ModelPick{}, &capacityError{Provider: "all", Msg: err.Error()}
@@ -134,6 +144,19 @@ func resolveSynopsisPick(ctx context.Context, flagVal string) (claudia.ModelPick
 		return claudia.ModelPick{}, err
 	}
 	return pick, nil
+}
+
+func synopsisHasGeneralIntel(args *claudia.ModelIntelArgs) bool {
+	latest, err := claudia.LatestModelIntel(args)
+	if err != nil {
+		return false
+	}
+	for _, o := range latest {
+		if o.Purpose == claudia.ModelPurposeGeneral {
+			return true
+		}
+	}
+	return false
 }
 
 func parseProviderNames(flagVal string) []claudia.Provider {
@@ -196,11 +219,20 @@ func generateSynopsis(ctx context.Context, pick claudia.ModelPick, prompt, workD
 		fmt.Fprintf(stderr, "ytt: synopsis: %s reply unusable: %v\n", p, parseErr)
 		return "", "", "", parseErr
 	}
-	used = p
-	if pick.Model != "" {
-		used = p + "/" + pick.Model
-	}
+	used = formatSynopsisPick(pick)
 	return slug, body, used, nil
+}
+
+func formatSynopsisPick(pick claudia.ModelPick) string {
+	p := string(pick.Provider)
+	if pick.Model == "" {
+		return p
+	}
+	used := p + "/" + pick.Model
+	if pick.Effort != "" {
+		used += "/" + string(pick.Effort)
+	}
+	return used
 }
 
 func isCapacityText(s string) bool {

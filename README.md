@@ -173,7 +173,7 @@ parsed as flags by the Go CLI — pass a URL in that case.
 | `YOUTUBE_INGEST_ANALYZE_CONCURRENCY` | same as download | Parallel analyze workers (no YouTube pacing). |
 | `YOUTUBE_INGEST_DOWNLOAD_BATCH` | `16` | Max videos fetched per download tick. Remainder waits for the next tick. `0` disables. |
 | `YOUTUBE_INGEST_YTT_BIN` | `ytt` (PATH) | Absolute path to the `ytt` used for transcript fetches and `ytt synopsis`. Pin it in scheduled runs so launchd and your shell can't resolve two different builds. |
-| `YOUTUBE_INGEST_SYNOPSIS_PROVIDERS` | *(unset)* | Optional Claudia preference (`grok`) or allowlist (`claude,codex`). Unset, `ytt` calls `Resolve` once (Task, plan, **standard** quality — Sonnet-class, not Haiku or Opus) and runs that pick. Not a fallback ladder: token-exhausted backends are skipped by Claudia, not retried by ytt. |
+| `YOUTUBE_INGEST_SYNOPSIS_PROVIDERS` | *(unset)* | Optional Claudia preference (`grok`) or allowlist (`claude,codex`). Unset, `ytt` calls `Resolve` once (Task, plan, **general** purpose, **standard** quality floor) and runs that pick — generation and effort are Resolve outputs, not host pins. Not a fallback ladder: token-exhausted backends are skipped by Claudia, not retried by ytt. If the purpose-quality series is still empty (no AA ingest), Resolve falls back to the catalog shelf so analyze does not abort. |
 | `YOUTUBE_INGEST_LOG` | `$YOUTUBE_INGEST_ROOT/.ingest.log` | Ingest log path. Point it outside the content tree for scheduled runs. |
 | `YOUTUBE_INGEST_NETWORK_WAIT` | `14400` | Seconds to wait (awake-time) for connectivity before giving up — covers launchd ticks that fire in a no-network DarkWake window. |
 | `YOUTUBE_INGEST_STALE_DAYS` | `7` | Days of zero ingests (with channels tracked) before the run is judged unhealthy. `0` disables the check. |
@@ -273,8 +273,9 @@ queue without fetching transcripts, running `ytt synopsis`, or reporting events.
 `ytt` fetches captions with `yt-dlp`. `ytt ingest` also needs `jq`,
 `yq`, and GNU `timeout`/`gtimeout` (Homebrew `coreutils` on macOS).
 Synopses go through `ytt synopsis`, which asks Claudia `Resolve` for one
-standard-quality plan model (remaining tokens; no vendor preference)
-and writes the file itself — ingest does not shell out to `claude -p`. The Homebrew formula declares `yt-dlp`,
+general-purpose plan model at a standard quality floor (remaining
+tokens; no vendor preference) and writes the file itself — ingest does
+not shell out to `claude -p`. The Homebrew formula declares `yt-dlp`,
 `jq`, `yq`, `coreutils`, and `blurter` as `depends_on`. Provider CLIs
 (`grok`, `claude`, `codex`) are resolved by Claudia; pin `GROK_BIN` /
 `CLAUDE_BIN` / `CODEX_BIN` in scheduled runs.
