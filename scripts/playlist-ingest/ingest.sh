@@ -294,8 +294,8 @@ die() {
 # doing network discovery or creating per-video state. launchd deliberately
 # starts with a minimal PATH, so leaving the lookup to a worker turns a
 # missing dependency into a misleading, apparently-successful empty run.
-# Synopses go through `ytt synopsis` (Claudia); grok/claude/codex are
-# resolved by Claudia itself, not by this script.
+# Synopses go through `ytt synopsis` (Claudia Resolve picks one model);
+# this script does not name a provider ladder.
 YTT_BIN="${YOUTUBE_INGEST_YTT_BIN:-ytt}"
 if ! YTT_BIN="$(command -v "$YTT_BIN")"; then
     die "ytt executable not found: ${YOUTUBE_INGEST_YTT_BIN:-ytt}; aborting"

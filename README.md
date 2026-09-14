@@ -106,7 +106,7 @@ ytt --json dQw4w9WgXcQ | jq .
 | `ytt ingest --download` | Paced YouTube fetch only (transcript + meta). Bounded per tick. |
 | `ytt ingest --analyze` | Unthrottled synopsis of on-disk downloads not yet in `.processed` |
 | `ytt build-index` | Regenerate `youtube-knowledge-base.md` from recent ingested synopses (default: last 7 days of uploads) |
-| `ytt synopsis --dir DIR --title TITLE --url URL` | Write one video's synopsis via Claudia (grok → claude → codex) |
+| `ytt synopsis --dir DIR --title TITLE --url URL` | Write one video's synopsis via Claudia Resolve (one pick) |
 
 ## Exit codes
 
@@ -139,7 +139,7 @@ $YOUTUBE_INGEST_ROOT/
 ├── <video-id>/
 │   ├── .transcript/transcript.json # full yt-dlp payload (hidden from Obsidian graph)
 │   ├── meta.json                   # title, channel, upload date, duration, …
-│   └── <slug>.md                   # synopsis (Claudia: grok → claude → codex)
+│   └── <slug>.md                   # synopsis (Claudia Resolve pick)
 ├── .processed                      # dedup state (one video ID per line)
 ├── .download-failed                # genuine YouTube dead-ends only (skipped later)
 ├── .channels/<handle>              # per-channel cursor file
@@ -173,7 +173,7 @@ parsed as flags by the Go CLI — pass a URL in that case.
 | `YOUTUBE_INGEST_ANALYZE_CONCURRENCY` | same as download | Parallel analyze workers (no YouTube pacing). |
 | `YOUTUBE_INGEST_DOWNLOAD_BATCH` | `16` | Max videos fetched per download tick. Remainder waits for the next tick. `0` disables. |
 | `YOUTUBE_INGEST_YTT_BIN` | `ytt` (PATH) | Absolute path to the `ytt` used for transcript fetches and `ytt synopsis`. Pin it in scheduled runs so launchd and your shell can't resolve two different builds. |
-| `YOUTUBE_INGEST_SYNOPSIS_PROVIDERS` | *(unset)* | Explicit Claudia Task ladder for synopses (e.g. `grok,claude,codex`). Unset, `ytt` asks Claudia to resolve the ladder from plan usage (`Resolve`: Task mode, plan capacity, Grok first) and skips providers that are hot or exhausted. Capacity/spend/rate-limit on one provider still falls through to the next. |
+| `YOUTUBE_INGEST_SYNOPSIS_PROVIDERS` | *(unset)* | Optional Claudia preference (`grok`) or allowlist (`claude,codex`). Unset, `ytt` calls `Resolve` once (Task mode, plan capacity, prefer Grok) and runs that pick. Not a fallback ladder: token-exhausted backends are skipped by Claudia, not retried by ytt. |
 | `YOUTUBE_INGEST_LOG` | `$YOUTUBE_INGEST_ROOT/.ingest.log` | Ingest log path. Point it outside the content tree for scheduled runs. |
 | `YOUTUBE_INGEST_NETWORK_WAIT` | `14400` | Seconds to wait (awake-time) for connectivity before giving up — covers launchd ticks that fire in a no-network DarkWake window. |
 | `YOUTUBE_INGEST_STALE_DAYS` | `7` | Days of zero ingests (with channels tracked) before the run is judged unhealthy. `0` disables the check. |
@@ -251,7 +251,7 @@ event:
 - a discovery source failed (playlist or channel feed)
 - a channels config was orphaned (see above)
 - downloading itself is failing this tick (pending misses outnumber successful fetches, or nothing succeeded), or the run watchdog fired. A single ID that stays pending while neighbours download is video trouble, logged and retried, not an unhealthy run
-- every available synopsis provider hit a capacity/spend/rate limit (`ytt synopsis` exit 255), so the analyze tick cut short; a mixed ladder failure (unusable or empty reply plus a last-rung capacity miss) fails that video only (exit 1) and does not abort the queue
+- Claudia Resolve finds no token-eligible model, or the chosen model hits a capacity/spend/rate limit (`ytt synopsis` exit 255), so the analyze tick cut short; an unusable or empty reply fails that video only (exit 1) and does not abort the queue
 - the knowledge-base index failed to refresh
 - **nothing has been ingested for `YOUTUBE_INGEST_STALE_DAYS` days** while
   channels are tracked — the liveness backstop for "every step succeeded and yet
@@ -272,9 +272,9 @@ queue without fetching transcripts, running `ytt synopsis`, or reporting events.
 
 `ytt` fetches captions with `yt-dlp`. `ytt ingest` also needs `jq`,
 `yq`, and GNU `timeout`/`gtimeout` (Homebrew `coreutils` on macOS).
-Synopses go through `ytt synopsis`, which runs a Claudia Task ladder
-(default `grok,claude,codex`) and writes the file itself — ingest does
-not shell out to `claude -p`. The Homebrew formula declares `yt-dlp`,
+Synopses go through `ytt synopsis`, which asks Claudia `Resolve` for one
+model (Task + plan + remaining tokens; Grok preferred) and writes the
+file itself — ingest does not shell out to `claude -p`. The Homebrew formula declares `yt-dlp`,
 `jq`, `yq`, `coreutils`, and `blurter` as `depends_on`. Provider CLIs
 (`grok`, `claude`, `codex`) are resolved by Claudia; pin `GROK_BIN` /
 `CLAUDE_BIN` / `CODEX_BIN` in scheduled runs.

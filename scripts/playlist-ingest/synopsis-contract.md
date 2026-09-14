@@ -5,7 +5,7 @@
   in their own words:
     - ingest-one.sh  / `ytt synopsis` read this file at runtime and
                      append it to the Claudia Task prompt (the scheduled
-                     path; ladder grok → claude → codex).
+                     path; Claudia Resolve picks one model).
     - the /ytt skill instructs the interactive agent to read this file
                      before composing a synopsis (the manual path).
     - `ytt build-index` (index.go) parses the artifacts this format

@@ -73,11 +73,11 @@ workflow** below).
 | `ytt synopsis --dir DIR --title TITLE --url URL` | Needs review |
 
 `build-index` rewrites `$YOUTUBE_INGEST_ROOT/youtube-knowledge-base.md`
-from on-disk synopses. `synopsis` runs a Claudia Task ladder (default
-`grok,claude,codex`, overridable with `--providers` or
-`YOUTUBE_INGEST_SYNOPSIS_PROVIDERS`) and writes `<slug>.md` into
-`--dir`. Format of that file is defined only in
-`scripts/playlist-ingest/synopsis-contract.md`.
+from on-disk synopses. `synopsis` calls Claudia `Resolve` once (Task +
+plan + token predicates; Grok preferred) and writes `<slug>.md` into
+`--dir`. `--providers` / `YOUTUBE_INGEST_SYNOPSIS_PROVIDERS` is a
+preference or allowlist, not a fallback ladder. Format of that file is
+defined only in `scripts/playlist-ingest/synopsis-contract.md`.
 
 ### Playlist-ingest workflow — env vars
 
@@ -96,7 +96,7 @@ from on-disk synopses. `synopsis` runs a Claudia Task ladder (default
 | `YOUTUBE_INGEST_DOWNLOAD_BATCH` | `16` | Needs review |
 | `YOUTUBE_INGEST_ORPHAN_MIN` | `60` | Needs review |
 | `YOUTUBE_INGEST_YTT_BIN` | `ytt` (PATH) | Stable |
-| `YOUTUBE_INGEST_SYNOPSIS_PROVIDERS` | `grok,claude,codex` | Needs review |
+| `YOUTUBE_INGEST_SYNOPSIS_PROVIDERS` | *(unset)* | Needs review |
 
 The default `YOUTUBE_INGEST_ROOT` of `~/think/knowledge/youtube` is
 personal-vault-shaped and likely to move to something neutral
@@ -149,7 +149,7 @@ URLs) are likely to land before 1.0.
 ## Gaps and prerequisites for 1.0
 
 Verification that already ships (do not re-plan as if it were missing):
-Go `-race` tests cover the CLI, JSON contract, `ytt synopsis` ladder, and
+Go `-race` tests cover the CLI, JSON contract, `ytt synopsis` Resolve pick, and
 `ytt build-index`; 73 bats cases cover ingest including bash 3.2 CI. The
 remaining gaps are schema and fixtures, not "only smoke checks exist".
 
@@ -165,7 +165,7 @@ remaining gaps are schema and fixtures, not "only smoke checks exist".
   (🎯T20.4).
 - **Provider CLIs for synopses**: `ytt synopsis` talks to Claudia;
   grok/claude/codex binaries are a runtime dependency of analyze, not
-  of the Go module. Document which of the ladder must be present for
+  of the Go module. Document which provider CLIs must be present for
   a scheduled run.
 
 ## Out of scope for 1.0

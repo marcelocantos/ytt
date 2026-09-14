@@ -229,7 +229,7 @@ do_analyze() {
         rm -f "$SYNOPSIS_OUT"
         if (( rc == 255 )); then
             : > "$ROOT/.spend-limit"
-            log "synopsis ladder exhausted on capacity; aborting analyze so the rest defers (exit 255 stops xargs)"
+            log "synopsis model at capacity; aborting analyze so the rest defers (exit 255 stops xargs)"
             exit 255
         fi
         log "synopsis failed; download kept for retry"

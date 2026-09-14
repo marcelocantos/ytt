@@ -46,102 +46,75 @@ func TestParseSynopsisReplyRejectsMissingTLDR(t *testing.T) {
 	}
 }
 
-func TestGenerateSynopsisFirstProviderWins(t *testing.T) {
+func testPick(provider, model string) claudia.ModelPick {
+	return claudia.ModelPick{Provider: claudia.Provider(provider), Model: model}
+}
+
+func TestGenerateSynopsisRunsTheResolvedPickOnce(t *testing.T) {
 	restore := runSynopsisProvider
 	t.Cleanup(func() { runSynopsisProvider = restore })
 	var tried []string
-	runSynopsisProvider = func(_ context.Context, provider, _, _ string) (string, error) {
-		tried = append(tried, provider)
+	runSynopsisProvider = func(_ context.Context, provider, model, _, _ string) (string, error) {
+		tried = append(tried, provider+"/"+model)
 		return "topic.md\n\n# T\n\n**TL;DR**: ok.\n", nil
 	}
 	var stderr bytes.Buffer
-	slug, _, used, err := generateSynopsis(context.Background(), []string{"grok", "claude"}, "p", t.TempDir(), &stderr)
+	slug, _, used, err := generateSynopsis(context.Background(), testPick("grok", "grok-4.5"), "p", t.TempDir(), &stderr)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if used != "grok" || slug != "topic.md" {
+	if used != "grok/grok-4.5" || slug != "topic.md" {
 		t.Fatalf("used=%s slug=%s tried=%v", used, slug, tried)
 	}
 	if len(tried) != 1 {
-		t.Fatalf("tried %v, want just grok", tried)
+		t.Fatalf("tried %v, want just the Resolve pick", tried)
 	}
 }
 
-func TestGenerateSynopsisFallsThroughCapacity(t *testing.T) {
+func TestGenerateSynopsisCapacityIsCapacityError(t *testing.T) {
 	restore := runSynopsisProvider
 	t.Cleanup(func() { runSynopsisProvider = restore })
-	runSynopsisProvider = func(_ context.Context, provider, _, _ string) (string, error) {
-		if provider == "grok" {
-			return "", &capacityError{Provider: "grok", Msg: "rate limit"}
-		}
-		return "from-claude.md\n\n# T\n\n**TL;DR**: via claude.\n", nil
-	}
-	var stderr bytes.Buffer
-	_, _, used, err := generateSynopsis(context.Background(), []string{"grok", "claude"}, "p", t.TempDir(), &stderr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if used != "claude" {
-		t.Fatalf("used = %s, want claude", used)
-	}
-}
-
-func TestGenerateSynopsisAllCapacityIs255Shape(t *testing.T) {
-	restore := runSynopsisProvider
-	t.Cleanup(func() { runSynopsisProvider = restore })
-	runSynopsisProvider = func(_ context.Context, provider, _, _ string) (string, error) {
+	runSynopsisProvider = func(_ context.Context, provider, _, _, _ string) (string, error) {
 		return "", &capacityError{Provider: provider, Msg: "monthly spend limit"}
 	}
 	var stderr bytes.Buffer
-	_, _, _, err := generateSynopsis(context.Background(), []string{"grok", "claude", "codex"}, "p", t.TempDir(), &stderr)
+	_, _, _, err := generateSynopsis(context.Background(), testPick("claude", "claude-sonnet-5"), "p", t.TempDir(), &stderr)
 	var cap *capacityError
 	if !errors.As(err, &cap) {
 		t.Fatalf("err = %v, want capacityError", err)
 	}
 }
 
-func TestGenerateSynopsisMixedFailureLastCapacityIsNotCapacityError(t *testing.T) {
+func TestGenerateSynopsisDoesNotFallThrough(t *testing.T) {
 	restore := runSynopsisProvider
 	t.Cleanup(func() { runSynopsisProvider = restore })
-	runSynopsisProvider = func(_ context.Context, provider, _, _ string) (string, error) {
-		switch provider {
-		case "grok":
-			return "I'll read the transcript first.\n\nnot a slug", nil
-		case "claude":
-			return "", errors.New("empty result")
-		default:
-			return "", &capacityError{Provider: provider, Msg: "usage limit"}
-		}
+	var tried []string
+	runSynopsisProvider = func(_ context.Context, provider, _, _, _ string) (string, error) {
+		tried = append(tried, provider)
+		return "not a synopsis", nil
 	}
 	var stderr bytes.Buffer
-	_, _, _, err := generateSynopsis(context.Background(), []string{"grok", "claude", "codex"}, "p", t.TempDir(), &stderr)
+	_, _, _, err := generateSynopsis(context.Background(), testPick("grok", "grok-4.5"), "p", t.TempDir(), &stderr)
 	if err == nil {
-		t.Fatal("expected error")
+		t.Fatal("expected unusable reply to fail the pick")
+	}
+	if len(tried) != 1 {
+		t.Fatalf("tried %v; Claudia already picked, ytt must not walk a ladder", tried)
 	}
 	var cap *capacityError
 	if errors.As(err, &cap) {
-		t.Fatalf("mixed failure leaked capacityError (would abort the analyze queue): %v", err)
-	}
-	if !strings.Contains(err.Error(), "mixed failures") {
-		t.Fatalf("err = %v, want mixed-failure wording", err)
+		t.Fatalf("unusable reply must not be capacityError: %v", err)
 	}
 }
 
-func TestGenerateSynopsisSkipsMissingThenFailsNonCapacity(t *testing.T) {
+func TestGenerateSynopsisNonCapacityFailureIsNotCapacityError(t *testing.T) {
 	restore := runSynopsisProvider
 	t.Cleanup(func() { runSynopsisProvider = restore })
-	runSynopsisProvider = func(_ context.Context, provider, _, _ string) (string, error) {
-		switch provider {
-		case "grok":
-			return "", errors.New("executable file not found in $PATH")
-		case "claude":
-			return "", errors.New("model hallucinated a tool")
-		default:
-			return "", errors.New("not reached")
-		}
+	runSynopsisProvider = func(_ context.Context, _, _, _, _ string) (string, error) {
+		return "", errors.New("empty result")
 	}
 	var stderr bytes.Buffer
-	_, _, _, err := generateSynopsis(context.Background(), []string{"grok", "claude"}, "p", t.TempDir(), &stderr)
+	_, _, _, err := generateSynopsis(context.Background(), testPick("claude", "claude-sonnet-5"), "p", t.TempDir(), &stderr)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -151,29 +124,10 @@ func TestGenerateSynopsisSkipsMissingThenFailsNonCapacity(t *testing.T) {
 	}
 }
 
-func TestGenerateSynopsisEmptyReplyTriesNext(t *testing.T) {
-	restore := runSynopsisProvider
-	t.Cleanup(func() { runSynopsisProvider = restore })
-	runSynopsisProvider = func(_ context.Context, provider, _, _ string) (string, error) {
-		if provider == "grok" {
-			return "not a synopsis", nil
-		}
-		return "ok.md\n\n# T\n\n**TL;DR**: recovered.\n", nil
-	}
-	var stderr bytes.Buffer
-	_, _, used, err := generateSynopsis(context.Background(), []string{"grok", "claude"}, "p", t.TempDir(), &stderr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if used != "claude" {
-		t.Fatalf("used = %s", used)
-	}
-}
-
 func TestCmdSynopsisWritesFile(t *testing.T) {
 	restore := runSynopsisProvider
 	t.Cleanup(func() { runSynopsisProvider = restore })
-	runSynopsisProvider = func(_ context.Context, _, _, _ string) (string, error) {
+	runSynopsisProvider = func(_ context.Context, _, _, _, _ string) (string, error) {
 		return "from-test.md\n\n# Title\n\n**TL;DR**: written by test.\n", nil
 	}
 	dir := t.TempDir()
@@ -182,6 +136,11 @@ func TestCmdSynopsisWritesFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("YOUTUBE_SYNOPSIS_CONTRACT", contract)
+	origRes := resolveSynopsis
+	t.Cleanup(func() { resolveSynopsis = origRes })
+	resolveSynopsis = func(_ context.Context, _ claudia.ModelPredicates) (claudia.ModelPick, error) {
+		return testPick("grok", "grok-4.5"), nil
+	}
 
 	var out, errb bytes.Buffer
 	code := cmdSynopsis([]string{
@@ -208,7 +167,7 @@ func TestCmdSynopsisWritesFile(t *testing.T) {
 func TestCmdSynopsisCapacityExit255(t *testing.T) {
 	restore := runSynopsisProvider
 	t.Cleanup(func() { runSynopsisProvider = restore })
-	runSynopsisProvider = func(_ context.Context, provider, _, _ string) (string, error) {
+	runSynopsisProvider = func(_ context.Context, provider, _, _, _ string) (string, error) {
 		return "", &capacityError{Provider: provider, Msg: "usage limit"}
 	}
 	dir := t.TempDir()
@@ -217,28 +176,25 @@ func TestCmdSynopsisCapacityExit255(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("YOUTUBE_SYNOPSIS_CONTRACT", contract)
+	origRes := resolveSynopsis
+	t.Cleanup(func() { resolveSynopsis = origRes })
+	resolveSynopsis = func(_ context.Context, _ claudia.ModelPredicates) (claudia.ModelPick, error) {
+		return testPick("claude", "claude-sonnet-5"), nil
+	}
 	var out, errb bytes.Buffer
 	code := cmdSynopsis([]string{
 		"--dir", dir, "--title", "T", "--url", "https://youtu.be/dQw4w9WgXcQ",
-		"--providers", "grok,claude",
 	}, &out, &errb)
 	if code != 255 {
 		t.Fatalf("exit %d, want 255 stderr=%s", code, errb.String())
 	}
 }
 
-func TestCmdSynopsisMixedFailureExit1(t *testing.T) {
+func TestCmdSynopsisUnusableReplyExit1(t *testing.T) {
 	restore := runSynopsisProvider
 	t.Cleanup(func() { runSynopsisProvider = restore })
-	runSynopsisProvider = func(_ context.Context, provider, _, _ string) (string, error) {
-		switch provider {
-		case "grok":
-			return "I'll read the transcript first.\n\nnot a slug", nil
-		case "claude":
-			return "", errors.New("empty result")
-		default:
-			return "", &capacityError{Provider: provider, Msg: "usage limit"}
-		}
+	runSynopsisProvider = func(_ context.Context, _, _, _, _ string) (string, error) {
+		return "I'll read the transcript first.\n\nnot a slug", nil
 	}
 	dir := t.TempDir()
 	contract := filepath.Join(dir, "contract.md")
@@ -246,39 +202,42 @@ func TestCmdSynopsisMixedFailureExit1(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("YOUTUBE_SYNOPSIS_CONTRACT", contract)
+	origRes := resolveSynopsis
+	t.Cleanup(func() { resolveSynopsis = origRes })
+	resolveSynopsis = func(_ context.Context, _ claudia.ModelPredicates) (claudia.ModelPick, error) {
+		return testPick("grok", "grok-4.5"), nil
+	}
 	var out, errb bytes.Buffer
 	code := cmdSynopsis([]string{
 		"--dir", dir, "--title", "T", "--url", "https://youtu.be/dQw4w9WgXcQ",
-		"--providers", "grok,claude,codex",
 	}, &out, &errb)
 	if code != 1 {
 		t.Fatalf("exit %d, want 1 (per-video fail, not 255 queue abort) stderr=%s", code, errb.String())
 	}
 }
 
-func TestParseProviderLadderDefault(t *testing.T) {
-	t.Setenv("YOUTUBE_INGEST_SYNOPSIS_PROVIDERS", "")
-	got := parseProviderLadder("")
-	want := []string{"grok", "claude", "codex"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("got %v", got)
+func TestCmdSynopsisResolveExhaustedExit255(t *testing.T) {
+	dir := t.TempDir()
+	contract := filepath.Join(dir, "contract.md")
+	if err := os.WriteFile(contract, []byte("contract"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("YOUTUBE_SYNOPSIS_CONTRACT", contract)
+	origRes := resolveSynopsis
+	t.Cleanup(func() { resolveSynopsis = origRes })
+	resolveSynopsis = func(_ context.Context, _ claudia.ModelPredicates) (claudia.ModelPick, error) {
+		return claudia.ModelPick{}, errors.New("resolve: no catalog model matches predicates")
+	}
+	var out, errb bytes.Buffer
+	code := cmdSynopsis([]string{
+		"--dir", dir, "--title", "T", "--url", "https://youtu.be/dQw4w9WgXcQ",
+	}, &out, &errb)
+	if code != 255 {
+		t.Fatalf("exit %d, want 255 stderr=%s", code, errb.String())
 	}
 }
 
-func TestResolveSynopsisProvidersFlagWins(t *testing.T) {
-	orig := resolveSynopsis
-	t.Cleanup(func() { resolveSynopsis = orig })
-	resolveSynopsis = func(context.Context, claudia.ModelPredicates) (claudia.ModelPick, error) {
-		t.Fatal("Resolve must not run when --providers / env is set")
-		return claudia.ModelPick{}, errors.New("unused")
-	}
-	got := resolveSynopsisProviders(context.Background(), "claude,codex")
-	if strings.Join(got, ",") != "claude,codex" {
-		t.Fatalf("got %v", got)
-	}
-}
-
-func TestResolveSynopsisProvidersDefaultWalksGrokThenClaudeThenCodex(t *testing.T) {
+func TestResolveSynopsisPickDefaultPrefersGrok(t *testing.T) {
 	t.Setenv("YOUTUBE_INGEST_SYNOPSIS_PROVIDERS", "")
 	origRes := resolveSynopsis
 	origLoad := loadSynopsisPlanUsage
@@ -290,13 +249,16 @@ func TestResolveSynopsisProvidersDefaultWalksGrokThenClaudeThenCodex(t *testing.
 		return []claudia.PlanUsage{}, nil
 	}
 	resolveSynopsis = defaultResolveSynopsis
-	got := resolveSynopsisProviders(context.Background(), "")
-	if strings.Join(got, ",") != "grok,claude,codex" {
-		t.Fatalf("unpublished usage must keep SuperGrok-first catalog walk, got %v", got)
+	got, err := resolveSynopsisPick(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Provider != claudia.ProviderGrok {
+		t.Fatalf("unpublished usage must prefer Grok, got %s/%s", got.Provider, got.Model)
 	}
 }
 
-func TestResolveSynopsisProvidersSkipsHotGrok(t *testing.T) {
+func TestResolveSynopsisPickSkipsHotGrok(t *testing.T) {
 	t.Setenv("YOUTUBE_INGEST_SYNOPSIS_PROVIDERS", "")
 	origRes := resolveSynopsis
 	origLoad := loadSynopsisPlanUsage
@@ -328,11 +290,52 @@ func TestResolveSynopsisProvidersSkipsHotGrok(t *testing.T) {
 		pred.Now = now
 		return defaultResolveSynopsis(ctx, pred)
 	}
-	got := resolveSynopsisProviders(context.Background(), "")
-	if len(got) == 0 || got[0] == "grok" {
-		t.Fatalf("hot Grok must not lead the ladder, got %v", got)
+	got, err := resolveSynopsisPick(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got[0] != "claude" {
-		t.Fatalf("want claude first after hot grok, got %v", got)
+	if got.Provider == claudia.ProviderGrok {
+		t.Fatalf("hot Grok must not be picked, got %s/%s", got.Provider, got.Model)
+	}
+	if got.Provider != claudia.ProviderClaude {
+		t.Fatalf("want claude after hot grok, got %s/%s", got.Provider, got.Model)
+	}
+}
+
+func TestResolveSynopsisPickAllowlistIsNotALadder(t *testing.T) {
+	t.Setenv("YOUTUBE_INGEST_SYNOPSIS_PROVIDERS", "")
+	origRes := resolveSynopsis
+	origLoad := loadSynopsisPlanUsage
+	t.Cleanup(func() {
+		resolveSynopsis = origRes
+		loadSynopsisPlanUsage = origLoad
+	})
+	loadSynopsisPlanUsage = func(context.Context) ([]claudia.PlanUsage, error) {
+		return []claudia.PlanUsage{}, nil
+	}
+	var seen claudia.ModelPredicates
+	resolveSynopsis = func(_ context.Context, pred claudia.ModelPredicates) (claudia.ModelPick, error) {
+		seen = pred
+		return testPick("claude", "claude-sonnet-5"), nil
+	}
+	got, err := resolveSynopsisPick(context.Background(), "claude,codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Provider != claudia.ProviderClaude {
+		t.Fatalf("got %s", got.Provider)
+	}
+	if seen.PreferProvider != claudia.ProviderClaude {
+		t.Fatalf("PreferProvider = %s", seen.PreferProvider)
+	}
+	excluded := map[claudia.Provider]bool{}
+	for _, p := range seen.ExcludeProviders {
+		excluded[p] = true
+	}
+	if !excluded[claudia.ProviderGrok] || !excluded[claudia.ProviderCursor] {
+		t.Fatalf("allowlist must exclude grok and cursor, got %v", seen.ExcludeProviders)
+	}
+	if excluded[claudia.ProviderClaude] || excluded[claudia.ProviderCodex] {
+		t.Fatalf("allowlist leaked into ExcludeProviders: %v", seen.ExcludeProviders)
 	}
 }

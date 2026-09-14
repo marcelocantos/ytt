@@ -19,17 +19,12 @@ import (
 	"github.com/marcelocantos/claudia"
 )
 
-// Default synopsis ladder: SuperGrok first so the Claude monthly spend
-// cap cannot red the whole nightly run; Claude then Codex absorb
-// capacity failures.
-const defaultSynopsisProviders = "grok,claude,codex"
-
 const synopsisProviderTimeout = 10 * time.Minute
 
 var slugRe = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+){0,5}\.md$`)
 
 // providerRun is the seam tests replace. Production talks to Claudia.
-type providerRun func(ctx context.Context, provider, prompt, workDir string) (string, error)
+type providerRun func(ctx context.Context, provider, model, prompt, workDir string) (string, error)
 
 var runSynopsisProvider providerRun = runClaudiaProvider
 
@@ -48,7 +43,7 @@ func cmdSynopsis(args []string, stdout, stderr io.Writer) int {
 	dir := fs.String("dir", "", "video directory containing meta.json and .transcript/")
 	title := fs.String("title", "", "video title")
 	url := fs.String("url", "", "YouTube URL")
-	providersFlag := fs.String("providers", "", "comma-separated ladder (default grok,claude,codex)")
+	providersFlag := fs.String("providers", "", "optional Claudia provider preference or allowlist (not a fallback ladder)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -63,13 +58,17 @@ func cmdSynopsis(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	prompt := buildSynopsisPrompt(*dir, *title, *url, contract)
-	providers := resolveSynopsisProviders(context.Background(), *providersFlag)
-	if len(providers) == 0 {
-		fmt.Fprintln(stderr, "ytt: synopsis: empty provider ladder")
-		return 2
+	pick, err := resolveSynopsisPick(context.Background(), *providersFlag)
+	if err != nil {
+		fmt.Fprintf(stderr, "ytt: synopsis: %v\n", err)
+		var cap *capacityError
+		if errors.As(err, &cap) {
+			return 255
+		}
+		return 1
 	}
 
-	slug, body, used, err := generateSynopsis(context.Background(), providers, prompt, *dir, stderr)
+	slug, body, used, err := generateSynopsis(context.Background(), pick, prompt, *dir, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "ytt: synopsis: %v\n", err)
 		var cap *capacityError
@@ -89,11 +88,10 @@ func cmdSynopsis(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// resolveSynopsisProviders is the 🎯T61.5 seam. An explicit flag or
-// YOUTUBE_INGEST_SYNOPSIS_PROVIDERS list still wins. The default path
-// asks Claudia Resolve (Task + PreferPlan + PreferProvider=grok) and
-// walks ExcludeProviders so capacity fall-through stays a host loop.
-// Cursor is excluded: claudiaProvider only speaks grok/claude/codex.
+// resolveSynopsis is the 🎯T61.5 seam. Claudia Resolve picks one model
+// from predicates (Task + PreferPlan + token availability). ytt does
+// not walk a host ladder. --providers / YOUTUBE_INGEST_SYNOPSIS_PROVIDERS
+// is a preference (one name) or allowlist (several names), not fall-through.
 var resolveSynopsis = defaultResolveSynopsis
 
 func defaultResolveSynopsis(ctx context.Context, pred claudia.ModelPredicates) (claudia.ModelPick, error) {
@@ -106,139 +104,101 @@ func defaultLoadSynopsisPlanUsage(ctx context.Context) ([]claudia.PlanUsage, err
 	return claudia.LoadPlanUsage(ctx, &claudia.PlanUsageCacheArgs{})
 }
 
-func resolveSynopsisProviders(ctx context.Context, flagVal string) []string {
-	if flagVal != "" || os.Getenv("YOUTUBE_INGEST_SYNOPSIS_PROVIDERS") != "" {
-		return parseProviderLadder(flagVal)
+func resolveSynopsisPick(ctx context.Context, flagVal string) (claudia.ModelPick, error) {
+	names := parseProviderNames(flagVal)
+	prefer := claudia.ProviderGrok
+	exclude := []claudia.Provider{claudia.ProviderCursor}
+	if len(names) == 1 {
+		prefer = names[0]
+	} else if len(names) > 1 {
+		prefer = names[0]
+		exclude = providersNotIn(names)
 	}
 	usage, err := loadSynopsisPlanUsage(ctx)
 	if err != nil || usage == nil {
 		usage = []claudia.PlanUsage{}
 	}
-	var out []string
-	exclude := []claudia.Provider{claudia.ProviderCursor}
-	for range 6 {
-		got, err := resolveSynopsis(ctx, claudia.ModelPredicates{
-			Mode:             claudia.CapabilityTask,
-			PreferPlan:       true,
-			PreferProvider:   claudia.ProviderGrok,
-			ExcludeProviders: exclude,
-			Usage:            usage,
-		})
-		if err != nil {
-			break
+	pick, err := resolveSynopsis(ctx, claudia.ModelPredicates{
+		Mode:             claudia.CapabilityTask,
+		PreferPlan:       true,
+		PreferProvider:   prefer,
+		ExcludeProviders: exclude,
+		Usage:            usage,
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "no catalog model matches") {
+			return claudia.ModelPick{}, &capacityError{Provider: "all", Msg: err.Error()}
 		}
-		out = append(out, string(got.Provider))
-		exclude = append(exclude, got.Provider)
+		return claudia.ModelPick{}, err
 	}
-	if len(out) == 0 {
-		return parseProviderLadder("")
-	}
-	return out
+	return pick, nil
 }
 
-func parseProviderLadder(flagVal string) []string {
+func parseProviderNames(flagVal string) []claudia.Provider {
 	raw := flagVal
 	if raw == "" {
 		raw = os.Getenv("YOUTUBE_INGEST_SYNOPSIS_PROVIDERS")
 	}
-	if raw == "" {
-		raw = defaultSynopsisProviders
-	}
-	var out []string
-	seen := map[string]bool{}
+	var out []claudia.Provider
+	seen := map[claudia.Provider]bool{}
 	for _, p := range strings.Split(raw, ",") {
 		p = strings.ToLower(strings.TrimSpace(p))
-		if p == "" || seen[p] {
+		if p == "" {
 			continue
 		}
-		seen[p] = true
-		out = append(out, p)
+		prov := claudia.Provider(p)
+		if seen[prov] {
+			continue
+		}
+		seen[prov] = true
+		out = append(out, prov)
 	}
 	return out
 }
 
-func generateSynopsis(ctx context.Context, providers []string, prompt, workDir string, stderr io.Writer) (slug, body, used string, err error) {
-	var last error
-	var lastCapacity *capacityError
-	available := 0
-	capacityHits := 0
-	for _, p := range providers {
-		pctx, cancel := context.WithTimeout(ctx, synopsisProviderTimeout)
-		text, runErr := runSynopsisProvider(pctx, p, prompt, workDir)
-		cancel()
-		if runErr != nil {
-			fmt.Fprintf(stderr, "ytt: synopsis: %s failed: %v\n", p, runErr)
-			last = runErr
-			var cap *capacityError
-			if errors.As(runErr, &cap) {
-				capacityHits++
-				available++
-				lastCapacity = cap
-				continue
-			}
-			if isCapacityText(runErr.Error()) {
-				capacityHits++
-				available++
-				lastCapacity = &capacityError{Provider: p, Msg: runErr.Error()}
-				continue
-			}
-			if isUnavailable(runErr) {
-				continue
-			}
-			available++
+func providersNotIn(allow []claudia.Provider) []claudia.Provider {
+	ok := map[claudia.Provider]bool{}
+	for _, p := range allow {
+		ok[p] = true
+	}
+	seen := map[claudia.Provider]bool{}
+	var out []claudia.Provider
+	for _, row := range claudia.ModelCatalog() {
+		if ok[row.Provider] || seen[row.Provider] {
 			continue
 		}
-		slug, body, parseErr := parseSynopsisReply(text)
-		if parseErr != nil {
-			fmt.Fprintf(stderr, "ytt: synopsis: %s reply unusable: %v\n", p, parseErr)
-			last = parseErr
-			available++
-			continue
-		}
-		return slug, body, p, nil
+		seen[row.Provider] = true
+		out = append(out, row.Provider)
 	}
-	if available > 0 && capacityHits == available {
-		if lastCapacity == nil {
-			lastCapacity = &capacityError{Provider: "all", Msg: "every available provider hit a capacity/spend/rate limit"}
-		}
-		return "", "", "", lastCapacity
-	}
-	if last == nil {
-		last = errors.New("no synopsis provider produced a usable reply")
-	}
-	// A last-rung capacity miss must not leak *capacityError: cmdSynopsis
-	// maps that type to exit 255, and ingest-one aborts the rest of the
-	// analyze queue. Only a true all-available-capacity wall (above) may.
-	var cap *capacityError
-	if errors.As(last, &cap) {
-		last = fmt.Errorf("no usable synopsis; last provider %s hit capacity among mixed failures: %s", cap.Provider, cap.Msg)
-	}
-	return "", "", "", last
+	return out
 }
 
-func isUnavailable(err error) bool {
-	if err == nil {
-		return false
-	}
-	s := strings.ToLower(err.Error())
-	needles := []string{
-		"not found",
-		"no such file",
-		"executable file not found",
-		"cannot find",
-		"not installed",
-		"auth error",
-		"not authenticated",
-		"not logged",
-		"please log in",
-		"subscription auth",
-	}
-	for _, n := range needles {
-		if strings.Contains(s, n) {
-			return true
+func generateSynopsis(ctx context.Context, pick claudia.ModelPick, prompt, workDir string, stderr io.Writer) (slug, body, used string, err error) {
+	p := string(pick.Provider)
+	pctx, cancel := context.WithTimeout(ctx, synopsisProviderTimeout)
+	defer cancel()
+	text, runErr := runSynopsisProvider(pctx, p, pick.Model, prompt, workDir)
+	if runErr != nil {
+		fmt.Fprintf(stderr, "ytt: synopsis: %s failed: %v\n", p, runErr)
+		var cap *capacityError
+		if errors.As(runErr, &cap) {
+			return "", "", "", cap
 		}
+		if isCapacityText(runErr.Error()) {
+			return "", "", "", &capacityError{Provider: p, Msg: runErr.Error()}
+		}
+		return "", "", "", runErr
 	}
-	return false
+	slug, body, parseErr := parseSynopsisReply(text)
+	if parseErr != nil {
+		fmt.Fprintf(stderr, "ytt: synopsis: %s reply unusable: %v\n", p, parseErr)
+		return "", "", "", parseErr
+	}
+	used = p
+	if pick.Model != "" {
+		used = p + "/" + pick.Model
+	}
+	return slug, body, used, nil
 }
 
 func isCapacityText(s string) bool {
@@ -394,7 +354,7 @@ func bundledPath(rel ...string) (string, error) {
 	return "", fmt.Errorf("bundled file not found near %s: %s", dir, filepath.Join(rel...))
 }
 
-func runClaudiaProvider(ctx context.Context, provider, prompt, workDir string) (string, error) {
+func runClaudiaProvider(ctx context.Context, provider, model, prompt, workDir string) (string, error) {
 	p, err := claudiaProvider(provider)
 	if err != nil {
 		return "", err
@@ -402,6 +362,7 @@ func runClaudiaProvider(ctx context.Context, provider, prompt, workDir string) (
 	cfg := claudia.TaskConfig{
 		ID:       "ytt-synopsis",
 		Provider: p,
+		Model:    model,
 		WorkDir:  workDir,
 	}
 	switch p {
