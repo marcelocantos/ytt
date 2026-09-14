@@ -107,7 +107,7 @@ func defaultLoadSynopsisPlanUsage(ctx context.Context) ([]claudia.PlanUsage, err
 func resolveSynopsisPick(ctx context.Context, flagVal string) (claudia.ModelPick, error) {
 	names := parseProviderNames(flagVal)
 	prefer := claudia.ProviderGrok
-	exclude := []claudia.Provider{claudia.ProviderCursor}
+	var exclude []claudia.Provider
 	if len(names) == 1 {
 		prefer = names[0]
 	} else if len(names) > 1 {
@@ -414,6 +414,8 @@ func claudiaProvider(name string) (claudia.Provider, error) {
 		return claudia.ProviderClaude, nil
 	case "codex":
 		return claudia.ProviderCodex, nil
+	case "cursor":
+		return claudia.ProviderCursor, nil
 	default:
 		return "", fmt.Errorf("unknown provider %q", name)
 	}

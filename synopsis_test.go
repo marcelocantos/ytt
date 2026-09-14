@@ -302,6 +302,30 @@ func TestResolveSynopsisPickSkipsHotGrok(t *testing.T) {
 	}
 }
 
+func TestResolveSynopsisPickDefaultDoesNotExcludeCursor(t *testing.T) {
+	t.Setenv("YOUTUBE_INGEST_SYNOPSIS_PROVIDERS", "")
+	origRes := resolveSynopsis
+	origLoad := loadSynopsisPlanUsage
+	t.Cleanup(func() {
+		resolveSynopsis = origRes
+		loadSynopsisPlanUsage = origLoad
+	})
+	loadSynopsisPlanUsage = func(context.Context) ([]claudia.PlanUsage, error) {
+		return []claudia.PlanUsage{}, nil
+	}
+	var seen claudia.ModelPredicates
+	resolveSynopsis = func(_ context.Context, pred claudia.ModelPredicates) (claudia.ModelPick, error) {
+		seen = pred
+		return testPick("grok", "grok-4.5"), nil
+	}
+	if _, err := resolveSynopsisPick(context.Background(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen.ExcludeProviders) != 0 {
+		t.Fatalf("default pick must not hard-exclude providers, got %v", seen.ExcludeProviders)
+	}
+}
+
 func TestResolveSynopsisPickAllowlistIsNotALadder(t *testing.T) {
 	t.Setenv("YOUTUBE_INGEST_SYNOPSIS_PROVIDERS", "")
 	origRes := resolveSynopsis
