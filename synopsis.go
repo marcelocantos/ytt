@@ -89,9 +89,10 @@ func cmdSynopsis(args []string, stdout, stderr io.Writer) int {
 }
 
 // resolveSynopsis is the 🎯T61.5 seam. Claudia Resolve picks one model
-// from predicates (Task + PreferPlan + token availability). ytt does
-// not walk a host ladder. --providers / YOUTUBE_INGEST_SYNOPSIS_PROVIDERS
-// is a preference (one name) or allowlist (several names), not fall-through.
+// from predicates (Task + plan + standard quality + token availability).
+// ytt does not name a vendor and does not walk a host ladder.
+// --providers / YOUTUBE_INGEST_SYNOPSIS_PROVIDERS is a preference (one
+// name) or allowlist (several names), not fall-through.
 var resolveSynopsis = defaultResolveSynopsis
 
 func defaultResolveSynopsis(ctx context.Context, pred claudia.ModelPredicates) (claudia.ModelPick, error) {
@@ -106,7 +107,7 @@ func defaultLoadSynopsisPlanUsage(ctx context.Context) ([]claudia.PlanUsage, err
 
 func resolveSynopsisPick(ctx context.Context, flagVal string) (claudia.ModelPick, error) {
 	names := parseProviderNames(flagVal)
-	prefer := claudia.ProviderGrok
+	var prefer claudia.Provider
 	var exclude []claudia.Provider
 	if len(names) == 1 {
 		prefer = names[0]
@@ -120,6 +121,7 @@ func resolveSynopsisPick(ctx context.Context, flagVal string) (claudia.ModelPick
 	}
 	pick, err := resolveSynopsis(ctx, claudia.ModelPredicates{
 		Mode:             claudia.CapabilityTask,
+		Quality:          claudia.ModelQualityStandard,
 		PreferPlan:       true,
 		PreferProvider:   prefer,
 		ExcludeProviders: exclude,

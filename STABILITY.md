@@ -74,10 +74,11 @@ workflow** below).
 
 `build-index` rewrites `$YOUTUBE_INGEST_ROOT/youtube-knowledge-base.md`
 from on-disk synopses. `synopsis` calls Claudia `Resolve` once (Task +
-plan + token predicates; Grok preferred) and writes `<slug>.md` into
-`--dir`. `--providers` / `YOUTUBE_INGEST_SYNOPSIS_PROVIDERS` is a
-preference or allowlist, not a fallback ladder. Format of that file is
-defined only in `scripts/playlist-ingest/synopsis-contract.md`.
+plan + standard quality + token predicates; no vendor preference) and
+writes `<slug>.md` into `--dir`. `--providers` /
+`YOUTUBE_INGEST_SYNOPSIS_PROVIDERS` is a preference or allowlist, not a
+fallback ladder. Format of that file is defined only in
+`scripts/playlist-ingest/synopsis-contract.md`.
 
 ### Playlist-ingest workflow — env vars
 

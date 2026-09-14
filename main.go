@@ -47,7 +47,7 @@ VIDEO may be a video ID or any YouTube URL (watch?v=, youtu.be/, /shorts/,
                      bulk-ingest: paced download and/or unthrottled analyze
   ytt build-index    regenerate the knowledge-base index from synopsis files
   ytt synopsis --dir DIR --title TITLE --url URL
-                     write a synopsis via Claudia Resolve (predicates, one pick)
+                     write a synopsis via Claudia Resolve (standard quality, one pick)
 `
 
 func main() {

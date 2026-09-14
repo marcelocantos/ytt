@@ -237,7 +237,7 @@ func TestCmdSynopsisResolveExhaustedExit255(t *testing.T) {
 	}
 }
 
-func TestResolveSynopsisPickDefaultPrefersGrok(t *testing.T) {
+func TestResolveSynopsisPickDefaultAsksForStandardQuality(t *testing.T) {
 	t.Setenv("YOUTUBE_INGEST_SYNOPSIS_PROVIDERS", "")
 	origRes := resolveSynopsis
 	origLoad := loadSynopsisPlanUsage
@@ -248,13 +248,23 @@ func TestResolveSynopsisPickDefaultPrefersGrok(t *testing.T) {
 	loadSynopsisPlanUsage = func(context.Context) ([]claudia.PlanUsage, error) {
 		return []claudia.PlanUsage{}, nil
 	}
-	resolveSynopsis = defaultResolveSynopsis
+	var seen claudia.ModelPredicates
+	resolveSynopsis = func(_ context.Context, pred claudia.ModelPredicates) (claudia.ModelPick, error) {
+		seen = pred
+		return defaultResolveSynopsis(context.Background(), pred)
+	}
 	got, err := resolveSynopsisPick(context.Background(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Provider != claudia.ProviderGrok {
-		t.Fatalf("unpublished usage must prefer Grok, got %s/%s", got.Provider, got.Model)
+	if seen.PreferProvider != "" {
+		t.Fatalf("default must not name a vendor, PreferProvider=%s", seen.PreferProvider)
+	}
+	if seen.Quality != claudia.ModelQualityStandard {
+		t.Fatalf("Quality = %s, want standard", seen.Quality)
+	}
+	if got.Quality != claudia.ModelQualityStandard {
+		t.Fatalf("pick must be standard intelligence, got %s/%s (%s)", got.Provider, got.Model, got.Quality)
 	}
 }
 
@@ -323,6 +333,9 @@ func TestResolveSynopsisPickDefaultDoesNotExcludeCursor(t *testing.T) {
 	}
 	if len(seen.ExcludeProviders) != 0 {
 		t.Fatalf("default pick must not hard-exclude providers, got %v", seen.ExcludeProviders)
+	}
+	if seen.PreferProvider != "" || seen.Quality != claudia.ModelQualityStandard {
+		t.Fatalf("default predicates: prefer=%q quality=%s", seen.PreferProvider, seen.Quality)
 	}
 }
 
