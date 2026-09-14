@@ -90,8 +90,9 @@ func cmdSynopsis(args []string, stdout, stderr io.Writer) int {
 
 // resolveSynopsis is the 🎯T61.5 seam. Claudia Resolve picks one
 // (generation, effort) pair from purpose-quality predicates (Task +
-// plan + general purpose + standard floor + token availability).
-// ytt does not name a vendor and does not walk a host ladder.
+// plan + analysis purpose + standard floor + token availability).
+// Missing analysis series yields to general inside Claudia. ytt does
+// not name a vendor and does not walk a host ladder.
 // --providers / YOUTUBE_INGEST_SYNOPSIS_PROVIDERS is a preference (one
 // name) or allowlist (several names), not fall-through.
 var resolveSynopsis = defaultResolveSynopsis
@@ -122,7 +123,7 @@ func resolveSynopsisPick(ctx context.Context, flagVal string) (claudia.ModelPick
 	}
 	pred := claudia.ModelPredicates{
 		Mode:             claudia.CapabilityTask,
-		Purpose:          claudia.ModelPurposeGeneral,
+		Purpose:          claudia.ModelPurposeAnalysis,
 		Quality:          claudia.ModelQualityStandard,
 		PreferPlan:       true,
 		PreferProvider:   prefer,
@@ -130,7 +131,13 @@ func resolveSynopsisPick(ctx context.Context, flagVal string) (claudia.ModelPick
 		Usage:            usage,
 	}
 	pick, err := resolveSynopsis(ctx, pred)
-	if err != nil && !synopsisHasGeneralIntel(pred.Intel) {
+	if err != nil && !synopsisHasPurposeIntel(pred.Intel, claudia.ModelPurposeAnalysis) {
+		// Claudia Resolve also yields analysis→general when the series
+		// is missing. Keep the host retry so an older pin still does.
+		pred.Purpose = claudia.ModelPurposeGeneral
+		pick, err = resolveSynopsis(ctx, pred)
+	}
+	if err != nil && !synopsisHasPurposeIntel(pred.Intel, claudia.ModelPurposeAnalysis) && !synopsisHasPurposeIntel(pred.Intel, claudia.ModelPurposeGeneral) {
 		// Purpose-quality needs a series. Until AA ingest has written
 		// one, empty Purpose keeps the catalog-shelf path so analyze
 		// does not abort every tick.
@@ -146,13 +153,13 @@ func resolveSynopsisPick(ctx context.Context, flagVal string) (claudia.ModelPick
 	return pick, nil
 }
 
-func synopsisHasGeneralIntel(args *claudia.ModelIntelArgs) bool {
+func synopsisHasPurposeIntel(args *claudia.ModelIntelArgs, purpose claudia.ModelPurpose) bool {
 	latest, err := claudia.LatestModelIntel(args)
 	if err != nil {
 		return false
 	}
 	for _, o := range latest {
-		if o.Purpose == claudia.ModelPurposeGeneral {
+		if o.Purpose == purpose {
 			return true
 		}
 	}

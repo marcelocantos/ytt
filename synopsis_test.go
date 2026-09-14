@@ -68,13 +68,15 @@ func testPick(provider, model string) claudia.ModelPick {
 func generalIntel() *claudia.ModelIntelArgs {
 	return &claudia.ModelIntelArgs{
 		Latest: []claudia.ModelObservation{
+			{Generation: "grok-4.6", Effort: claudia.ModelEffortHigh, Purpose: claudia.ModelPurposeAnalysis, Value: 80, CostUSD: 0.05},
+			{Generation: "grok-4.5", Effort: claudia.ModelEffortHigh, Purpose: claudia.ModelPurposeAnalysis, Value: 62, CostUSD: 0.04},
+			{Generation: "claude-sonnet-5", Effort: claudia.ModelEffortHigh, Purpose: claudia.ModelPurposeAnalysis, Value: 72, CostUSD: 0.10},
+			{Generation: "claude-opus-5", Effort: claudia.ModelEffortHigh, Purpose: claudia.ModelPurposeAnalysis, Value: 90, CostUSD: 0.50},
+			{Generation: "claude-haiku-4-5", Effort: claudia.ModelEffortUnspecified, Purpose: claudia.ModelPurposeAnalysis, Value: 35, CostUSD: 0.01},
+			{Generation: "gpt-5-codex", Effort: claudia.ModelEffortHigh, Purpose: claudia.ModelPurposeAnalysis, Value: 68, CostUSD: 0.30},
+			{Generation: "composer-2.5", Effort: claudia.ModelEffortUnspecified, Purpose: claudia.ModelPurposeAnalysis, Value: 58, CostUSD: 0.20},
 			{Generation: "grok-4.6", Effort: claudia.ModelEffortHigh, Purpose: claudia.ModelPurposeGeneral, Value: 80, CostUSD: 0.05},
-			{Generation: "grok-4.5", Effort: claudia.ModelEffortHigh, Purpose: claudia.ModelPurposeGeneral, Value: 62, CostUSD: 0.04},
 			{Generation: "claude-sonnet-5", Effort: claudia.ModelEffortHigh, Purpose: claudia.ModelPurposeGeneral, Value: 72, CostUSD: 0.10},
-			{Generation: "claude-opus-5", Effort: claudia.ModelEffortHigh, Purpose: claudia.ModelPurposeGeneral, Value: 90, CostUSD: 0.50},
-			{Generation: "claude-haiku-4-5", Effort: claudia.ModelEffortUnspecified, Purpose: claudia.ModelPurposeGeneral, Value: 35, CostUSD: 0.01},
-			{Generation: "gpt-5-codex", Effort: claudia.ModelEffortHigh, Purpose: claudia.ModelPurposeGeneral, Value: 68, CostUSD: 0.30},
-			{Generation: "composer-2.5", Effort: claudia.ModelEffortUnspecified, Purpose: claudia.ModelPurposeGeneral, Value: 58, CostUSD: 0.20},
 		},
 	}
 }
@@ -298,8 +300,8 @@ func TestResolveSynopsisPickDefaultAsksForStandardQuality(t *testing.T) {
 	if seen.PreferProvider != "" {
 		t.Fatalf("default must not name a vendor, PreferProvider=%s", seen.PreferProvider)
 	}
-	if seen.Purpose != claudia.ModelPurposeGeneral {
-		t.Fatalf("Purpose = %s, want general", seen.Purpose)
+	if seen.Purpose != claudia.ModelPurposeAnalysis {
+		t.Fatalf("Purpose = %s, want analysis", seen.Purpose)
 	}
 	if seen.Quality != claudia.ModelQualityStandard {
 		t.Fatalf("Quality = %s, want standard", seen.Quality)
@@ -307,7 +309,7 @@ func TestResolveSynopsisPickDefaultAsksForStandardQuality(t *testing.T) {
 	if got.Quality != claudia.ModelQualityStandard {
 		t.Fatalf("pick must be standard intelligence, got %s/%s (%s)", got.Provider, got.Model, got.Quality)
 	}
-	if got.Purpose != claudia.ModelPurposeGeneral || got.Effort == "" {
+	if got.Purpose != claudia.ModelPurposeAnalysis || got.Effort == "" {
 		t.Fatalf("pick must carry purpose-quality outputs, got %+v", got)
 	}
 }
@@ -378,7 +380,7 @@ func TestResolveSynopsisPickDefaultDoesNotExcludeCursor(t *testing.T) {
 	if len(seen.ExcludeProviders) != 0 {
 		t.Fatalf("default pick must not hard-exclude providers, got %v", seen.ExcludeProviders)
 	}
-	if seen.PreferProvider != "" || seen.Quality != claudia.ModelQualityStandard || seen.Purpose != claudia.ModelPurposeGeneral {
+	if seen.PreferProvider != "" || seen.Quality != claudia.ModelQualityStandard || seen.Purpose != claudia.ModelPurposeAnalysis {
 		t.Fatalf("default predicates: prefer=%q quality=%s purpose=%s", seen.PreferProvider, seen.Quality, seen.Purpose)
 	}
 }
@@ -407,8 +409,8 @@ func TestResolveSynopsisPickFallsBackWithoutIntelSeries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(purposes) != 2 || purposes[0] != claudia.ModelPurposeGeneral || purposes[1] != "" {
-		t.Fatalf("want general then catalog retry, got %v", purposes)
+	if len(purposes) != 3 || purposes[0] != claudia.ModelPurposeAnalysis || purposes[1] != claudia.ModelPurposeGeneral || purposes[2] != "" {
+		t.Fatalf("want analysis, general, then catalog, got %v", purposes)
 	}
 	if got.Provider != claudia.ProviderClaude {
 		t.Fatalf("catalog fallback pick %s", got.Provider)
