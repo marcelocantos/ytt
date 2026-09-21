@@ -180,7 +180,9 @@ parsed as flags by the Go CLI — pass a URL in that case.
 | `YOUTUBE_INDEX_RECENT_DAYS` | `7` | `ytt build-index` includes only videos whose YouTube upload date is on or after today minus this many days. `0` lists the full catalog. Older synopses stay on disk. |
 | `YOUTUBE_INGEST_STATE_DIR` | `~/.local/state/ytt` | Where the liveness stamp lives. Kept out of the content tree. |
 | `YOUTUBE_INGEST_QUEUE` | `$YOUTUBE_INGEST_STATE_DIR/backfill.ids` | Optional extra video-ID hopper (one ID per line). Deduped against `.processed` each run and drained by the same paced workers as the playlist. |
-| `YOUTUBE_INGEST_BLURTER_BIN` | `blurter` (PATH) | The blurter binary used to report events. Pin it in scheduled runs. |
+| `YOUTUBE_INGEST_BLURTER_BIN` | `blurter` (PATH) | The blurter binary used to report events. Pin it in scheduled runs. Download and analyze use distinct keys (`ytt-ingest-$STAGE-$severity`) so one job cannot recover the other. |
+| `YOUTUBE_INGEST_REQUIRE_DAEMON` | *(unset)* | When `1`, `--analyze` dies unless `claudia broker status` succeeds. Set on the scheduled analyze job so it will not spawn providers beside the daemon. |
+| `CLAUDIA_BIN` | `claudia` (PATH) | Claudia CLI used for the daemon preflight. Pin it to the same binary that serves the broker (Homebrew `claudia` 0.41+). |
 
 ### Scheduling
 

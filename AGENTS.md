@@ -3,7 +3,7 @@
 Go CLI that fetches YouTube transcripts via yt-dlp and drives a bulk
 ingest pipeline. `ytt ingest` execs bundled bash under
 `scripts/playlist-ingest/`; `ytt synopsis` talks to Claudia
-(grok → claude → codex); `ytt build-index` rewrites the knowledge-base
+(Claudia Resolve picks one model); `ytt build-index` rewrites the knowledge-base
 table. There is no Python package and no `claude -p` path.
 
 Consumer CLI contract: [`agents-guide.md`](agents-guide.md) (also

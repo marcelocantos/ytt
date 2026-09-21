@@ -417,6 +417,27 @@ func TestResolveSynopsisPickFallsBackWithoutIntelSeries(t *testing.T) {
 	}
 }
 
+func TestResolveSynopsisPickPropagatesPlanUsageError(t *testing.T) {
+	t.Setenv("YOUTUBE_INGEST_SYNOPSIS_PROVIDERS", "")
+	origRes := resolveSynopsis
+	origLoad := loadSynopsisPlanUsage
+	t.Cleanup(func() {
+		resolveSynopsis = origRes
+		loadSynopsisPlanUsage = origLoad
+	})
+	loadSynopsisPlanUsage = func(context.Context) ([]claudia.PlanUsage, error) {
+		return nil, errors.New("claudia: broker protocol: unknown_field")
+	}
+	resolveSynopsis = func(context.Context, claudia.ModelPredicates) (claudia.ModelPick, error) {
+		t.Fatal("Resolve must not run after a plan-usage error")
+		return claudia.ModelPick{}, nil
+	}
+	_, err := resolveSynopsisPick(context.Background(), "")
+	if err == nil || !strings.Contains(err.Error(), "unknown_field") {
+		t.Fatalf("want broker error, got %v", err)
+	}
+}
+
 func TestResolveSynopsisPickAllowlistIsNotALadder(t *testing.T) {
 	t.Setenv("YOUTUBE_INGEST_SYNOPSIS_PROVIDERS", "")
 	origRes := resolveSynopsis

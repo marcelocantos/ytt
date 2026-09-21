@@ -271,13 +271,14 @@ notify() {
     # --link points blurter's notification click action at this run's log.
     # --key collapses repeats: the counts in $subject vary run to run while the
     # underlying problem does not, and blurter would otherwise treat every run
-    # as a fresh problem and alert nightly.
+    # as a fresh problem and alert nightly. STAGE is part of the key so a
+    # healthy download tick cannot recover (or hide) an analyze problem.
     # SC2094: --link only passes $LOG's path as an argument; nothing reads the
     # file here, so writing to it in the same pipeline is safe.
     # shellcheck disable=SC2094
     if ! printf '%s\n' "$@" \
             | "$BLURTER_BIN" send --app ytt --severity "$severity" \
-                --subject "$subject" --body - --key "ytt-ingest-$severity" \
+                --subject "$subject" --body - --key "ytt-ingest-$STAGE-$severity" \
                 --link "$LOG" --quiet >>"$LOG" 2>&1; then
         log "reporting to blurter failed (see $LOG); continuing"
     fi
@@ -322,6 +323,12 @@ ytt_help_has() {
     done
     return 1
 }
+CLAUDIA_BIN="${CLAUDIA_BIN:-claudia}"
+if [[ "$STAGE" != download && "${YOUTUBE_INGEST_REQUIRE_DAEMON:-}" == "1" ]]; then
+    if ! command -v "$CLAUDIA_BIN" >/dev/null || ! "$CLAUDIA_BIN" broker status >/dev/null 2>&1; then
+        die "claudia daemon not reachable ($CLAUDIA_BIN broker status); analyze will not spawn providers directly"
+    fi
+fi
 if [[ "$STAGE" != download ]]; then
     if ! ytt_help_has 'build-index'; then
         die "ytt at $YTT_BIN does not implement build-index (the ingest scripts require it); aborting"

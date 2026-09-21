@@ -15,6 +15,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"syscall"
+
+	"github.com/marcelocantos/claudia"
 )
 
 // version is overridden at build time via -ldflags "-X main.version=...".
@@ -93,7 +95,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	switch {
 	case showVersion:
-		fmt.Fprintf(stdout, "ytt %s\n", version)
+		fmt.Fprintf(stdout, "ytt %s (claudia %s)\n", version, claudia.Version)
 		return 0
 	case helpAgent:
 		guide, err := embedded.ReadFile("agents-guide.md")

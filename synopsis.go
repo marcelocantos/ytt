@@ -67,6 +67,7 @@ func cmdSynopsis(args []string, stdout, stderr io.Writer) int {
 		}
 		return 1
 	}
+	fmt.Fprintf(stderr, "ytt: synopsis: resolve %s\n", formatSynopsisPick(pick))
 
 	slug, body, used, err := generateSynopsis(context.Background(), pick, prompt, *dir, stderr)
 	if err != nil {
@@ -118,7 +119,13 @@ func resolveSynopsisPick(ctx context.Context, flagVal string) (claudia.ModelPick
 		exclude = providersNotIn(names)
 	}
 	usage, err := loadSynopsisPlanUsage(ctx)
-	if err != nil || usage == nil {
+	if err != nil {
+		// A listening daemon that we cannot speak to is a hard miss.
+		// Swallowing it used to pick without plan slack, then fail on
+		// Task.Run — or worse, fall through to a direct spawn.
+		return claudia.ModelPick{}, err
+	}
+	if usage == nil {
 		usage = []claudia.PlanUsage{}
 	}
 	pred := claudia.ModelPredicates{
