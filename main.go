@@ -21,7 +21,7 @@ import (
 
 // version is overridden at build time via -ldflags "-X main.version=...".
 // The release workflow verifies it against the tag.
-var version = "0.14.0"
+var version = "0.15.0"
 
 //go:embed agents-guide.md
 var embedded embed.FS

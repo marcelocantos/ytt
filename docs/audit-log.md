@@ -155,3 +155,13 @@ maintenance activities. Append-only — newest entries at the bottom.
 - **Deferred**: Crosshair nightly (🎯T7); remaining entropy-audit
   children including json3 fixture (🎯T20.4). Claude Task print-mode
   prompt swallowed by variadic `--disallowedTools` is Claudia 🎯T49.
+
+## 2026-09-21 — /release v0.15.0
+
+- **Outcome**: `ytt synopsis` asks Claudia Resolve once (analysis
+  purpose, standard quality, plan slack; no host ladder or vendor
+  pin). Pins claudia v0.41.0 so plan usage and Tasks speak the running
+  broker. Analyze launchd requires a live daemon; download and analyze
+  use distinct blurter keys. 🎯T27 retired.
+- **Deferred**: Crosshair nightly (🎯T7, open PR #25); remaining
+  entropy-audit children including json3 fixture (🎯T20.4).
