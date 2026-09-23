@@ -358,6 +358,120 @@ func TestResolveSynopsisPickSkipsHotGrok(t *testing.T) {
 	}
 }
 
+func TestCmdSynopsisNeverCreatesTaskOnOverspentProvider(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		used float64
+		rem  float64
+	}{
+		{name: "orange", used: 70, rem: 30},
+		{name: "red", used: 80, rem: 20},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			restoreRun := runSynopsisProvider
+			restoreResolve := resolveSynopsis
+			restoreUsage := loadSynopsisPlanUsage
+			t.Cleanup(func() {
+				runSynopsisProvider = restoreRun
+				resolveSynopsis = restoreResolve
+				loadSynopsisPlanUsage = restoreUsage
+			})
+			runSynopsisProvider = func(context.Context, string, string, string, string) (string, error) {
+				t.Fatal("agent creation must not run on an overspent provider")
+				return "", nil
+			}
+			resolveSynopsis = func(_ context.Context, pred claudia.ModelPredicates) (claudia.ModelPick, error) {
+				if !containsProvider(pred.ExcludeProviders, claudia.ProviderGrok) {
+					t.Fatal("overspent provider must be excluded before resolution")
+				}
+				// The post-resolution gate remains necessary if an older resolver
+				// ignores ExcludeProviders or the snapshot changes during resolution.
+				return testPick("grok", "grok-4.6"), nil
+			}
+			loadSynopsisPlanUsage = func(context.Context) ([]claudia.PlanUsage, error) {
+				return []claudia.PlanUsage{testSynopsisPlanUsage(claudia.ProviderGrok, tc.used, tc.rem)}, nil
+			}
+
+			dir := t.TempDir()
+			contract := filepath.Join(dir, "contract.md")
+			if err := os.WriteFile(contract, []byte("contract"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("YOUTUBE_SYNOPSIS_CONTRACT", contract)
+			var out, errb bytes.Buffer
+			code := cmdSynopsis([]string{"--dir", dir, "--title", "T", "--url", "https://youtu.be/dQw4w9WgXcQ"}, &out, &errb)
+			if code != 255 {
+				t.Fatalf("exit %d, want 255; stderr=%s", code, errb.String())
+			}
+			if !strings.Contains(errb.String(), "overspent") {
+				t.Fatalf("stderr = %q, want overspent provider error", errb.String())
+			}
+		})
+	}
+}
+
+func TestCmdSynopsisCreatesTaskOnGreenProvider(t *testing.T) {
+	restoreRun := runSynopsisProvider
+	restoreResolve := resolveSynopsis
+	restoreUsage := loadSynopsisPlanUsage
+	t.Cleanup(func() {
+		runSynopsisProvider = restoreRun
+		resolveSynopsis = restoreResolve
+		loadSynopsisPlanUsage = restoreUsage
+	})
+	called := false
+	runSynopsisProvider = func(context.Context, string, string, string, string) (string, error) {
+		called = true
+		return "green-provider.md\n\n# Title\n\n**TL;DR**: created.\n", nil
+	}
+	resolveSynopsis = func(_ context.Context, pred claudia.ModelPredicates) (claudia.ModelPick, error) {
+		if containsProvider(pred.ExcludeProviders, claudia.ProviderGrok) {
+			t.Fatal("green provider must remain eligible")
+		}
+		return testPick("grok", "grok-4.6"), nil
+	}
+	loadSynopsisPlanUsage = func(context.Context) ([]claudia.PlanUsage, error) {
+		return []claudia.PlanUsage{testSynopsisPlanUsage(claudia.ProviderGrok, 50, 50)}, nil
+	}
+
+	dir := t.TempDir()
+	contract := filepath.Join(dir, "contract.md")
+	if err := os.WriteFile(contract, []byte("contract"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("YOUTUBE_SYNOPSIS_CONTRACT", contract)
+	var out, errb bytes.Buffer
+	code := cmdSynopsis([]string{"--dir", dir, "--title", "T", "--url", "https://youtu.be/dQw4w9WgXcQ"}, &out, &errb)
+	if code != 0 || !called {
+		t.Fatalf("exit=%d called=%v stderr=%s", code, called, errb.String())
+	}
+}
+
+func containsProvider(providers []claudia.Provider, want claudia.Provider) bool {
+	for _, provider := range providers {
+		if provider == want {
+			return true
+		}
+	}
+	return false
+}
+
+func testSynopsisPlanUsage(provider claudia.Provider, used, rem float64) claudia.PlanUsage {
+	now := time.Now()
+	reset := now.Add(7 * 24 * time.Hour / 2)
+	return claudia.PlanUsage{
+		Provider: provider,
+		Status:   claudia.PlanUsageAvailable,
+		Windows: []claudia.PlanWindow{{
+			Name:             claudia.PlanWindowWeekly,
+			UsedPercent:      &used,
+			RemainingPercent: &rem,
+			ResetsAt:         &reset,
+			LimitWindow:      7 * 24 * time.Hour,
+		}},
+	}
+}
+
 func TestResolveSynopsisPickDefaultDoesNotExcludeCursor(t *testing.T) {
 	t.Setenv("YOUTUBE_INGEST_SYNOPSIS_PROVIDERS", "")
 	origRes := resolveSynopsis

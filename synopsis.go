@@ -128,6 +128,11 @@ func resolveSynopsisPick(ctx context.Context, flagVal string) (claudia.ModelPick
 	if usage == nil {
 		usage = []claudia.PlanUsage{}
 	}
+	now := time.Now()
+	// Claudia's general availability gate permits an ahead (orange) plan so
+	// callers can choose their own pacing policy. A ytt synopsis is background
+	// work: it must preserve both orange and red providers for interactive use.
+	exclude = append(exclude, overspentSynopsisProviders(usage, now)...)
 	pred := claudia.ModelPredicates{
 		Mode:             claudia.CapabilityTask,
 		Purpose:          claudia.ModelPurposeAnalysis,
@@ -157,7 +162,51 @@ func resolveSynopsisPick(ctx context.Context, flagVal string) (claudia.ModelPick
 		}
 		return claudia.ModelPick{}, err
 	}
+	if err := checkSynopsisPickCapacity(pick, usage, now); err != nil {
+		return claudia.ModelPick{}, err
+	}
 	return pick, nil
+}
+
+// overspentSynopsisProviders returns providers in the owner-visible orange or
+// red states. Unknown/unpublished usage remains eligible; it is not evidence
+// that a provider has been overspent.
+func overspentSynopsisProviders(usage []claudia.PlanUsage, now time.Time) []claudia.Provider {
+	var out []claudia.Provider
+	seen := map[claudia.Provider]bool{}
+	for _, u := range usage {
+		if seen[u.Provider] || !synopsisProviderOverspent(u, now) {
+			continue
+		}
+		seen[u.Provider] = true
+		out = append(out, u.Provider)
+	}
+	return out
+}
+
+func checkSynopsisPickCapacity(pick claudia.ModelPick, usage []claudia.PlanUsage, now time.Time) error {
+	for _, u := range usage {
+		if u.Provider == pick.Provider && synopsisProviderOverspent(u, now) {
+			return &capacityError{Provider: string(pick.Provider), Msg: "provider is overspent (orange or red plan usage)"}
+		}
+	}
+	return nil
+}
+
+func synopsisProviderOverspent(usage claudia.PlanUsage, now time.Time) bool {
+	v := claudia.ClassifyPlan(usage, now, nil)
+	if v.ExhaustedReason {
+		return true
+	}
+	switch v.Weekly {
+	case claudia.PlanBandAhead, claudia.PlanBandHot, claudia.PlanBandExhausted:
+		return true
+	}
+	switch v.Session {
+	case claudia.PlanSessionLow, claudia.PlanSessionExhausted:
+		return true
+	}
+	return false
 }
 
 func synopsisHasPurposeIntel(args *claudia.ModelIntelArgs, purpose claudia.ModelPurpose) bool {
