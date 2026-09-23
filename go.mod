@@ -2,7 +2,7 @@ module github.com/marcelocantos/ytt
 
 go 1.26.1
 
-require github.com/marcelocantos/claudia v0.41.0
+require github.com/marcelocantos/claudia v0.43.0
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.43.3 // indirect

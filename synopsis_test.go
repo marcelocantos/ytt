@@ -165,6 +165,9 @@ func TestGenerateSynopsisNonCapacityFailureIsNotCapacityError(t *testing.T) {
 }
 
 func TestCmdSynopsisWritesFile(t *testing.T) {
+	origLoad := loadSynopsisPlanUsage
+	t.Cleanup(func() { loadSynopsisPlanUsage = origLoad })
+	loadSynopsisPlanUsage = func(context.Context) ([]claudia.PlanUsage, error) { return nil, nil }
 	restore := runSynopsisProvider
 	t.Cleanup(func() { runSynopsisProvider = restore })
 	runSynopsisProvider = func(_ context.Context, _, _, _, _ string) (string, error) {
@@ -205,6 +208,9 @@ func TestCmdSynopsisWritesFile(t *testing.T) {
 }
 
 func TestCmdSynopsisCapacityExit255(t *testing.T) {
+	origLoad := loadSynopsisPlanUsage
+	t.Cleanup(func() { loadSynopsisPlanUsage = origLoad })
+	loadSynopsisPlanUsage = func(context.Context) ([]claudia.PlanUsage, error) { return nil, nil }
 	restore := runSynopsisProvider
 	t.Cleanup(func() { runSynopsisProvider = restore })
 	runSynopsisProvider = func(_ context.Context, provider, _, _, _ string) (string, error) {
@@ -257,6 +263,9 @@ func TestCmdSynopsisUnusableReplyExit1(t *testing.T) {
 }
 
 func TestCmdSynopsisResolveExhaustedExit255(t *testing.T) {
+	origLoad := loadSynopsisPlanUsage
+	t.Cleanup(func() { loadSynopsisPlanUsage = origLoad })
+	loadSynopsisPlanUsage = func(context.Context) ([]claudia.PlanUsage, error) { return nil, nil }
 	dir := t.TempDir()
 	contract := filepath.Join(dir, "contract.md")
 	if err := os.WriteFile(contract, []byte("contract"), 0o644); err != nil {
@@ -305,6 +314,9 @@ func TestResolveSynopsisPickDefaultAsksForStandardQuality(t *testing.T) {
 	}
 	if seen.Quality != claudia.ModelQualityStandard {
 		t.Fatalf("Quality = %s, want standard", seen.Quality)
+	}
+	if !seen.Background {
+		t.Fatal("synopsis must resolve as background work")
 	}
 	if got.Quality != claudia.ModelQualityStandard {
 		t.Fatalf("pick must be standard intelligence, got %s/%s (%s)", got.Provider, got.Model, got.Quality)
@@ -359,6 +371,7 @@ func TestResolveSynopsisPickSkipsHotGrok(t *testing.T) {
 }
 
 func TestCmdSynopsisNeverCreatesTaskOnOverspentProvider(t *testing.T) {
+	t.Setenv("YOUTUBE_INGEST_SYNOPSIS_PROVIDERS", "")
 	for _, tc := range []struct {
 		name string
 		used float64
@@ -380,16 +393,14 @@ func TestCmdSynopsisNeverCreatesTaskOnOverspentProvider(t *testing.T) {
 				t.Fatal("agent creation must not run on an overspent provider")
 				return "", nil
 			}
-			resolveSynopsis = func(_ context.Context, pred claudia.ModelPredicates) (claudia.ModelPick, error) {
-				if !containsProvider(pred.ExcludeProviders, claudia.ProviderGrok) {
-					t.Fatal("overspent provider must be excluded before resolution")
-				}
-				// The post-resolution gate remains necessary if an older resolver
-				// ignores ExcludeProviders or the snapshot changes during resolution.
-				return testPick("grok", "grok-4.6"), nil
-			}
+			resolveSynopsis = withPurposeIntel(defaultResolveSynopsis)
 			loadSynopsisPlanUsage = func(context.Context) ([]claudia.PlanUsage, error) {
-				return []claudia.PlanUsage{testSynopsisPlanUsage(claudia.ProviderGrok, tc.used, tc.rem)}, nil
+				return []claudia.PlanUsage{
+					testSynopsisPlanUsage(claudia.ProviderGrok, tc.used, tc.rem),
+					testSynopsisPlanUsage(claudia.ProviderClaude, tc.used, tc.rem),
+					testSynopsisPlanUsage(claudia.ProviderCodex, tc.used, tc.rem),
+					testSynopsisPlanUsage(claudia.ProviderCursor, tc.used, tc.rem),
+				}, nil
 			}
 
 			dir := t.TempDir()
@@ -403,8 +414,8 @@ func TestCmdSynopsisNeverCreatesTaskOnOverspentProvider(t *testing.T) {
 			if code != 255 {
 				t.Fatalf("exit %d, want 255; stderr=%s", code, errb.String())
 			}
-			if !strings.Contains(errb.String(), "overspent") {
-				t.Fatalf("stderr = %q, want overspent provider error", errb.String())
+			if !strings.Contains(errb.String(), "capacity") {
+				t.Fatalf("stderr = %q, want capacity error", errb.String())
 			}
 		})
 	}
@@ -425,8 +436,8 @@ func TestCmdSynopsisCreatesTaskOnGreenProvider(t *testing.T) {
 		return "green-provider.md\n\n# Title\n\n**TL;DR**: created.\n", nil
 	}
 	resolveSynopsis = func(_ context.Context, pred claudia.ModelPredicates) (claudia.ModelPick, error) {
-		if containsProvider(pred.ExcludeProviders, claudia.ProviderGrok) {
-			t.Fatal("green provider must remain eligible")
+		if !pred.Background || len(pred.ExcludeProviders) != 0 {
+			t.Fatalf("green background provider must remain eligible: %+v", pred)
 		}
 		return testPick("grok", "grok-4.6"), nil
 	}
@@ -445,15 +456,6 @@ func TestCmdSynopsisCreatesTaskOnGreenProvider(t *testing.T) {
 	if code != 0 || !called {
 		t.Fatalf("exit=%d called=%v stderr=%s", code, called, errb.String())
 	}
-}
-
-func containsProvider(providers []claudia.Provider, want claudia.Provider) bool {
-	for _, provider := range providers {
-		if provider == want {
-			return true
-		}
-	}
-	return false
 }
 
 func testSynopsisPlanUsage(provider claudia.Provider, used, rem float64) claudia.PlanUsage {
