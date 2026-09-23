@@ -21,7 +21,7 @@ import (
 
 // version is overridden at build time via -ldflags "-X main.version=...".
 // The release workflow verifies it against the tag.
-var version = "0.15.0"
+var version = "0.16.0"
 
 //go:embed agents-guide.md
 var embedded embed.FS
@@ -49,7 +49,7 @@ VIDEO may be a video ID or any YouTube URL (watch?v=, youtu.be/, /shorts/,
                      bulk-ingest: paced download and/or unthrottled analyze
   ytt build-index    regenerate the knowledge-base index from synopsis files
   ytt synopsis --dir DIR --title TITLE --url URL
-                     write a synopsis via Claudia Resolve (analysis purpose, standard floor, one pick)
+                     write a background synopsis via Claudia Resolve (analysis purpose, standard floor, one pick)
 `
 
 func main() {

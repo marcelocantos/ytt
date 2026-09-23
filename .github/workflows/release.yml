@@ -65,6 +65,7 @@ jobs:
           # `ytt ingest` resolves scripts/ relative to the binary at runtime,
           # so the bash workflow has to ship alongside it inside the tarball.
           cp -R scripts dist/ytt/scripts
+          cp LICENSE NOTICE README.md dist/ytt/
 
       - name: Package tarball
         shell: bash

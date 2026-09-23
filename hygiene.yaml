@@ -398,12 +398,11 @@ items:
   - id: governance.notice
     dim: governance
     desc: Third-party attribution NOTICE for Go module dependencies
-    state: planned
+    state: present
     cadence: per-release
     enforce: informational
     tier: 3
-    reason: Direct dep is claudia (large transitive graph); no NOTICE yet.
-    evidence: {absent: {file: {path: NOTICE}}}
+    evidence: {file: {path: NOTICE}}
 
   # ================================= BUILD ===============================
   - id: build.go-version

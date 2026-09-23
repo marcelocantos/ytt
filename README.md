@@ -115,6 +115,7 @@ ytt --json dQw4w9WgXcQ | jq .
 | 0 | All transcripts fetched successfully |
 | 1 | One or more videos failed (unavailable, transcripts disabled, etc.) |
 | 2 | Usage error (no arguments, bad flag) |
+| 255 | Synopsis providers at capacity; no agent created, so ingest defers the video |
 
 Errors are written to stderr, one line per failure, in the form
 `ytt: <video-id>: <reason>`.
@@ -306,4 +307,4 @@ a failed run, not a successful empty tick.
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+Apache 2.0 — see [LICENSE](LICENSE). Third-party attributions are in [NOTICE](NOTICE).

@@ -16,7 +16,7 @@ Usage:
   ytt build-index                  regenerate youtube-knowledge-base.md (recent uploads)
   ytt synopsis --dir DIR --title T --url URL
                                    write one synopsis via Claudia
-                                   (Resolve: Task + plan + analysis purpose + standard floor)
+                                   (Resolve: background Task + plan + analysis purpose + standard floor)
 
 Accepted input forms:
   dQw4w9WgXcQ                      raw 11-character video ID
@@ -43,6 +43,7 @@ Exit codes:
   0   all requested transcripts fetched successfully
   1   at least one video failed (unavailable, transcripts disabled, etc.)
   2   usage error (no arguments, bad flag)
+  255 synopsis providers at capacity; no agent created, so ingest defers the video
 
 Agent tips:
   - Use --json when you want per-segment timing, language metadata, and
@@ -57,6 +58,8 @@ Agent tips:
     scripts/playlist-ingest/. Configure via env vars (see README §Playlist
     ingest); requires `yt-dlp`, `jq`, `yq`, and `timeout`/`gtimeout` on PATH.
     Synopses are `ytt synopsis` (Claudia), not `claude -p`.
+    Claudia skips orange/red providers for background synopses, even when a
+    provider is preferred. If none is eligible, the download remains pending.
   - Channel config lives in `$XDG_CONFIG_HOME/ytt/channels.yaml` (normally
     ~/.config/ytt/channels.yaml), NOT beside the installed scripts — the
     Homebrew prefix is replaced on every upgrade, so config stored there
