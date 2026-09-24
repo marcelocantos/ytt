@@ -115,17 +115,28 @@ load lib
     [[ "$output" == *"cursor → NEWEST-----"* ]]
 }
 
-@test "spend limit: run is cut short, remainder reported deferred" {
+@test "spend limit: backlog is deferred without an unhealthy or recovery alert" {
     set_playlist "SPEND1-----"
     export MOCK_CLAUDE_SPEND_LIMIT="SPEND1-----"
+    set_last_ingest_days_ago 15
 
     run_ingest
 
-    [ "$status" -eq 1 ]
+    [ "$status" -eq 0 ]
     [[ "$output" == *"deferred (synopsis providers at capacity"* ]]
+    [[ "$output" != *"UNHEALTHY"* ]]
+    [ -z "$(reported)" ]
     ! grep -Fxq -- "SPEND1-----" "$ROOT/.processed" 2>/dev/null
     # Marker is cleaned up by ingest.sh after detecting it.
     [ ! -f "$ROOT/.spend-limit" ]
+
+    # The scheduled analyze-only tick must be quiet too, including when its
+    # liveness stamp is old because capacity has prevented any landing.
+    run_ingest --analyze
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"deferred (synopsis providers at capacity"* ]]
+    [[ "$output" != *"UNHEALTHY"* ]]
+    [ -z "$(reported)" ]
 }
 
 @test "run watchdog: caps the fan-out and reports termination" {

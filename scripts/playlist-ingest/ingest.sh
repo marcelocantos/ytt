@@ -243,6 +243,7 @@ collect_pending_analyze() {
 # list is BOTH the exit-code decision and the notification body, so there is
 # no way to add a failure mode that fails the run without also alerting.
 ISSUES=()
+SPEND_LIMITED=false
 note_issue() {
     ISSUES+=("$*")
     log "UNHEALTHY: $*"
@@ -742,6 +743,11 @@ finish() {
         notify problem "ytt ingest unhealthy (${#ISSUES[@]} issue(s)): $summary" "${ISSUES[@]}"
         exit 1
     fi
+    # Capacity is an expected pause, not a recovery. Keep the backlog visible
+    # in the log without sending a problem or a misleading healthy event.
+    if $SPEND_LIMITED; then
+        exit 0
+    fi
     notify ok "ytt ingest healthy: $summary" "$summary"
     exit 0
 }
@@ -853,7 +859,6 @@ fi
 # Not YouTube-throttled. Capacity 255 stops the analyze fan-out only.
 INGESTED=0
 analyze_rc=0
-SPEND_LIMITED=false
 if [[ "$STAGE" != download ]]; then
     collect_pending_analyze
     if (( ${#PENDING_ANALYZE[@]} > 0 )); then
@@ -876,7 +881,10 @@ if [[ "$STAGE" != download ]]; then
         ANALYZE_LEFT=$(( ${#PENDING_ANALYZE[@]} - INGESTED ))
         if $SPEND_LIMITED; then
             log "analyzed $INGESTED, $ANALYZE_LEFT deferred (synopsis providers at capacity)"
-            note_issue "synopsis providers at capacity — $ANALYZE_LEFT video(s) stay on disk for the next analyze tick"
+            # xargs returns non-zero when a child exits 255 to stop the queue
+            # (the exact status differs on macOS). The marker identifies the
+            # expected capacity stop, so it is not a failed fan-out.
+            analyze_rc=0
         elif (( ANALYZE_LEFT > 0 )) && (( analyze_rc != 124 )); then
             log "analyzed $INGESTED, $ANALYZE_LEFT failed"
             note_issue "$ANALYZE_LEFT of ${#PENDING_ANALYZE[@]} analyze(s) failed this tick and stay on disk"
@@ -938,8 +946,9 @@ if (( INGESTED > 0 )); then
     date -u +%s > "$STAMP"
 elif [[ "$STAGE" != download ]]; then
     # Download ticks produce no .processed rows; staleness is an analyze
-    # concern (knowledge landing), not a fetch concern.
-    check_staleness
+    # concern (knowledge landing), not a fetch concern. A known capacity
+    # pause already explains the absence of new synopses.
+    if ! $SPEND_LIMITED; then check_staleness; fi
 fi
 
 # Refresh the knowledge-base index whenever new synopses landed. Without
