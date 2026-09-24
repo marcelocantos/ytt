@@ -1,6 +1,7 @@
 # Build artefacts.
 /ytt
 /dist/
+/.vera/
 
 # Go
 *.test
