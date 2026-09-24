@@ -1,7 +1,7 @@
 Third-party components in the YTT binary
 ========================================
 
-github.com/marcelocantos/claudia v0.43.0 is licensed under Apache-2.0;
+github.com/marcelocantos/claudia v0.44.0 is licensed under Apache-2.0;
 Copyright 2026 Marcelo Cantos. The AWS SDK for Go v2 modules below,
 including github.com/aws/smithy-go v1.27.6, are also Apache-2.0.
 The full licence text is in LICENSE.
