@@ -665,9 +665,9 @@ EOF
     [[ "$(reported)" != *"ytt-ingest-download-"* ]]
 }
 
-@test "analyze with REQUIRE_DAEMON dies when the claudia daemon is down" {
+@test "analyze with REQUIRE_DAEMON dies when jevons-broker is down" {
     export YOUTUBE_INGEST_REQUIRE_DAEMON=1
-    export CLAUDIA_BIN=false
+    export JEVONS_BROKER_BIN=false
     mkdir -p "$ROOT/DAEMON-----/.transcript"
     printf '{"video_id":"DAEMON-----"}\n' > "$ROOT/DAEMON-----/.transcript/transcript.json"
     printf '{"title":"on disk","id":"DAEMON-----"}\n' > "$ROOT/DAEMON-----/meta.json"
@@ -675,7 +675,7 @@ EOF
     run_ingest --analyze
 
     [ "$status" -eq 1 ]
-    [[ "$output" == *"claudia daemon not reachable"* ]]
+    [[ "$output" == *"jevons-broker is not listening"* ]]
     [ ! -f "$ROOT/DAEMON-----/mock-synopsis-DAEMON-----.md" ]
 }
 

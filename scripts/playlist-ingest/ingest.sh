@@ -324,10 +324,14 @@ ytt_help_has() {
     done
     return 1
 }
-CLAUDIA_BIN="${CLAUDIA_BIN:-claudia}"
+JEVONS_BROKER_BIN="${JEVONS_BROKER_BIN:-jevons-broker}"
 if [[ "$STAGE" != download && "${YOUTUBE_INGEST_REQUIRE_DAEMON:-}" == "1" ]]; then
-    if ! command -v "$CLAUDIA_BIN" >/dev/null || ! "$CLAUDIA_BIN" broker status >/dev/null 2>&1; then
-        die "claudia daemon not reachable ($CLAUDIA_BIN broker status); analyze will not spawn providers directly"
+    broker="$JEVONS_BROKER_BIN"
+    if [[ "$broker" != /* ]]; then
+        broker="$(command -v "$broker" 2>/dev/null || true)"
+    fi
+    if [[ -z "$broker" || ! -x "$broker" ]] || ! "$broker" status >/dev/null 2>&1; then
+        die "jevons-broker is not listening ($JEVONS_BROKER_BIN status); analyze will not spawn providers beside Jevons"
     fi
 fi
 if [[ "$STAGE" != download ]]; then

@@ -93,7 +93,7 @@ fallback ladder. Format of that file is defined only in
 | `YOUTUBE_INGEST_QUEUE` | `$YOUTUBE_INGEST_STATE_DIR/backfill.ids` | Needs review |
 | `YOUTUBE_INGEST_BLURTER_BIN` | `blurter` (PATH) | Needs review |
 | `YOUTUBE_INGEST_REQUIRE_DAEMON` | *(unset)* | Needs review |
-| `CLAUDIA_BIN` | `claudia` (PATH) | Needs review |
+| `JEVONS_BROKER_BIN` | `jevons-broker` (PATH) | Needs review |
 | `YOUTUBE_INGEST_CONCURRENCY` | `4` | Stable |
 | `YOUTUBE_INGEST_ANALYZE_CONCURRENCY` | same as download | Needs review |
 | `YOUTUBE_INGEST_DOWNLOAD_BATCH` | `16` | Needs review |
