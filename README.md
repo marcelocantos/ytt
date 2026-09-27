@@ -182,8 +182,8 @@ parsed as flags by the Go CLI — pass a URL in that case.
 | `YOUTUBE_INGEST_STATE_DIR` | `~/.local/state/ytt` | Where the liveness stamp lives. Kept out of the content tree. |
 | `YOUTUBE_INGEST_QUEUE` | `$YOUTUBE_INGEST_STATE_DIR/backfill.ids` | Optional extra video-ID hopper (one ID per line). Deduped against `.processed` each run and drained by the same paced workers as the playlist. |
 | `YOUTUBE_INGEST_BLURTER_BIN` | `blurter` (PATH) | The blurter binary used to report events. Pin it in scheduled runs. Download and analyze use distinct event keys, but Blurter recovery is app-scoped; a healthy download can close an analyze problem. |
-| `YOUTUBE_INGEST_REQUIRE_DAEMON` | *(unset)* | When `1`, `--analyze` dies unless `jevons-broker status` succeeds. Set on the scheduled analyze job so it will not spawn providers beside Jevons. |
-| `JEVONS_BROKER_BIN` | `jevons-broker` (PATH) | Jevons broker used for the daemon preflight. Pin it to the same binary that owns the host broker socket. |
+| `YOUTUBE_INGEST_REQUIRE_DAEMON` | *(unset)* | When `1`, `--analyze` dies unless `claudia broker status` succeeds. Set on the scheduled analyze job so it will not spawn providers beside the host broker. |
+| `CLAUDIA_BIN` | `claudia` (PATH) | Claudia CLI used for the host broker preflight. |
 
 ### Scheduling
 
@@ -284,10 +284,10 @@ not shell out to `claude -p`. The Homebrew formula declares `yt-dlp`,
 (`grok`, `claude`, `codex`) are resolved by Claudia; pin `GROK_BIN` /
 `CLAUDE_BIN` / `CODEX_BIN` in scheduled runs.
 
-When `jevons-broker` is listening, `ytt` does not spawn provider
-processes beside it: each synopsis Task runs on Jevons's broker socket.
+When `claudia broker serve` is listening, `ytt` does not spawn provider
+processes beside it: each synopsis Task runs on the host broker socket.
 Without a broker (or with `CLAUDIA_NO_BROKER=1`) `ytt` falls back to a
-direct spawn. The scheduled analyze job requires `jevons-broker status`.
+direct spawn. The scheduled analyze job requires `claudia broker status`.
 
 The bundled launchd plists pin `ytt` and those provider binaries to
 absolute paths. A scheduled run that does not land discovered videos is

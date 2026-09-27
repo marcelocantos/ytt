@@ -665,9 +665,9 @@ EOF
     [[ "$(reported)" != *"ytt-ingest-download-"* ]]
 }
 
-@test "analyze with REQUIRE_DAEMON dies when jevons-broker is down" {
+@test "analyze with REQUIRE_DAEMON dies when claudia broker is down" {
     export YOUTUBE_INGEST_REQUIRE_DAEMON=1
-    export JEVONS_BROKER_BIN=false
+    export CLAUDIA_BIN=false
     mkdir -p "$ROOT/DAEMON-----/.transcript"
     printf '{"video_id":"DAEMON-----"}\n' > "$ROOT/DAEMON-----/.transcript/transcript.json"
     printf '{"title":"on disk","id":"DAEMON-----"}\n' > "$ROOT/DAEMON-----/meta.json"
@@ -675,8 +675,23 @@ EOF
     run_ingest --analyze
 
     [ "$status" -eq 1 ]
-    [[ "$output" == *"jevons-broker is not listening"* ]]
+    [[ "$output" == *"claudia broker is not listening"* ]]
     [ ! -f "$ROOT/DAEMON-----/mock-synopsis-DAEMON-----.md" ]
+}
+
+@test "analyze with REQUIRE_DAEMON accepts claudia broker status" {
+    export YOUTUBE_INGEST_REQUIRE_DAEMON=1
+    export CLAUDIA_BIN="$ROOT/claudia-ok"
+    printf '#!/bin/sh\n[ "$1" = broker ] && [ "$2" = status ]\n' > "$CLAUDIA_BIN"
+    chmod +x "$CLAUDIA_BIN"
+    mkdir -p "$ROOT/DAEMONOK---/.transcript"
+    printf '{"video_id":"DAEMONOK---"}\n' > "$ROOT/DAEMONOK---/.transcript/transcript.json"
+    printf '{"title":"on disk","id":"DAEMONOK---"}\n' > "$ROOT/DAEMONOK---/meta.json"
+
+    run_ingest --analyze
+
+    [ "$status" -eq 0 ]
+    [ -f "$ROOT/DAEMONOK---/mock-synopsis-DAEMONOK---.md" ]
 }
 
 @test "undownloadable ids are recorded once and not retried" {

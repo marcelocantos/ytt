@@ -66,8 +66,8 @@
         <string>/Users/marcelo/.config/ytt/channels.yaml</string>
         <key>YOUTUBE_INGEST_BLURTER_BIN</key>
         <string>/opt/homebrew/bin/blurter</string>
-        <key>JEVONS_BROKER_BIN</key>
-        <string>/Users/marcelo/work/github.com/marcelocantos/jevons/bin/jevons-broker</string>
+        <key>CLAUDIA_BIN</key>
+        <string>/opt/homebrew/bin/claudia</string>
         <key>YOUTUBE_INGEST_LOG</key>
         <string>/Users/marcelo/.local/var/log/youtube-ingest/ingest.log</string>
     </dict>

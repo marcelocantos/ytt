@@ -2,10 +2,10 @@
 
 Go CLI that fetches YouTube transcripts via yt-dlp and drives a bulk
 ingest pipeline. `ytt ingest` execs bundled bash under
-`scripts/playlist-ingest/`; `ytt synopsis` talks to Jevons's broker
+`scripts/playlist-ingest/`; `ytt synopsis` talks to the host Claudia broker
 (Claudia Resolve still picks one model); `ytt build-index` rewrites the knowledge-base
 table. There is no Python package and no `claude -p` path. Scheduled
-analyze requires `jevons-broker status`, not Homebrew `claudia`.
+analyze requires `claudia broker status`.
 
 Consumer CLI contract: [`agents-guide.md`](agents-guide.md) (also
 embedded as `ytt --help-agent`). Synopsis file format:
