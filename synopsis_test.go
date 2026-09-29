@@ -29,6 +29,43 @@ func TestParseSynopsisReplySlugThenBody(t *testing.T) {
 	}
 }
 
+func TestParseSynopsisReplyNormalisesSlugLine(t *testing.T) {
+	for _, tc := range []struct{ first, want string }{
+		{"maple-shop-assembly-table-build", "maple-shop-assembly-table-build.md"},
+		{"a-day-in-the-life-shop-workflow.md", "a-day-in-the-life-shop.md"},
+		{"`agent-memory`", "agent-memory.md"},
+	} {
+		slug, body, err := parseSynopsisReply(tc.first + "\n\n# Title\n\n**TL;DR**: A claim.\n")
+		if err != nil {
+			t.Errorf("%q: %v", tc.first, err)
+			continue
+		}
+		if slug != tc.want {
+			t.Errorf("%q: slug = %q, want %q", tc.first, slug, tc.want)
+		}
+		if !strings.HasPrefix(body, "# Title") {
+			t.Errorf("%q: body = %q", tc.first, body)
+		}
+	}
+}
+
+func TestParseSynopsisReplySkipsLeadingNarration(t *testing.T) {
+	slug, body, err := parseSynopsisReply("Now I have the full transcript. Writing the synopsis.\n\nai-labs-agent-liability\n\n# Title\n\n**TL;DR**: A claim.\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slug != "ai-labs-agent-liability.md" || !strings.HasPrefix(body, "# Title") {
+		t.Fatalf("slug=%q body=%q", slug, body)
+	}
+}
+
+func TestParseSynopsisReplyRejectsNarrationOnly(t *testing.T) {
+	_, _, err := parseSynopsisReply("Checking the video directory for metadata.\nPlease paste the transcript.\n")
+	if err == nil {
+		t.Fatal("narration-only reply accepted")
+	}
+}
+
 func TestParseSynopsisReplyHeadingFallback(t *testing.T) {
 	slug, _, err := parseSynopsisReply("# Hot Water Freezes Faster\n\n**TL;DR**: Mpemba.\n")
 	if err != nil {

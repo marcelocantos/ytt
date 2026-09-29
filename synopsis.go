@@ -21,7 +21,11 @@ import (
 
 const synopsisProviderTimeout = 10 * time.Minute
 
-var slugRe = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+){0,5}\.md$`)
+// slugRe recognises a slug line in a reply. It is deliberately looser than the
+// contract (2–6 words ending in .md): models routinely drop the .md or run a
+// word long, and rejecting those replies left videos failing every tick.
+// parseSynopsisReply normalises a match to the contract via slugify.
+var slugRe = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*(\.md)?$`)
 
 // providerRun is the seam tests replace. Production talks to Claudia.
 type providerRun func(ctx context.Context, provider, model, prompt, workDir string) (string, error)
@@ -284,23 +288,30 @@ func parseSynopsisReply(raw string) (slug, body string, err error) {
 		return "", "", errors.New("empty reply")
 	}
 
-	nl := strings.IndexByte(raw, '\n')
-	first, rest := raw, ""
-	if nl >= 0 {
-		first = strings.TrimSpace(raw[:nl])
-		rest = strings.TrimSpace(raw[nl+1:])
+	// Agentic replies often open with narration ("Now I have the full
+	// transcript. Writing the synopsis.") before the slug line. Skip any
+	// leading lines until the first slug or heading; the TL;DR check below
+	// still rejects a reply that never gets to a synopsis.
+	lines := strings.Split(raw, "\n")
+	found := false
+	for i, line := range lines {
+		first := strings.Trim(strings.TrimSpace(line), "`")
+		switch {
+		case slugRe.MatchString(first) && !strings.HasPrefix(first, "transcript"):
+			slug = slugify(strings.TrimSuffix(first, ".md")) + ".md"
+			body = strings.TrimSpace(strings.Join(lines[i+1:], "\n"))
+		case strings.HasPrefix(first, "# "):
+			slug = slugify(strings.TrimPrefix(first, "# ")) + ".md"
+			body = strings.TrimSpace(strings.Join(lines[i:], "\n"))
+		default:
+			continue
+		}
+		found = true
+		break
 	}
-	first = strings.Trim(first, "`")
-
-	switch {
-	case slugRe.MatchString(first) && !strings.HasPrefix(first, "transcript"):
-		slug = first
-		body = rest
-	case strings.HasPrefix(first, "# "):
-		slug = slugify(strings.TrimPrefix(first, "# ")) + ".md"
-		body = raw
-	default:
-		return "", "", fmt.Errorf("first line is not a slug or heading: %q", first)
+	if !found {
+		first, _, _ := strings.Cut(raw, "\n")
+		return "", "", fmt.Errorf("no slug or heading line; first line: %q", strings.TrimSpace(first))
 	}
 	if !strings.Contains(body, "**TL;DR**:") {
 		return "", "", errors.New("reply missing **TL;DR**: line")
