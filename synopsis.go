@@ -420,10 +420,11 @@ func runClaudiaProvider(ctx context.Context, provider, model, prompt, workDir st
 		return "", err
 	}
 	cfg := claudia.TaskConfig{
-		ID:       "ytt-synopsis",
-		Provider: p,
-		Model:    model,
-		WorkDir:  workDir,
+		ID:            "ytt-synopsis",
+		Provider:      p,
+		Model:         model,
+		WorkDir:       workDir,
+		RequireBroker: true,
 	}
 	switch p {
 	case claudia.ProviderClaude:

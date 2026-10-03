@@ -60,6 +60,8 @@ Agent tips:
     Synopses are `ytt synopsis` (Claudia), not `claude -p`.
     Claudia skips orange/red providers for background synopses, even when a
     provider is preferred. If none is eligible, the download remains pending.
+    Every synopsis requires the host Claudia broker; YTT never falls back to
+    spawning a provider directly when the broker is unavailable.
   - Channel config lives in `$XDG_CONFIG_HOME/ytt/channels.yaml` (normally
     ~/.config/ytt/channels.yaml), NOT beside the installed scripts — the
     Homebrew prefix is replaced on every upgrade, so config stored there

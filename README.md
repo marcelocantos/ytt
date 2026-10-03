@@ -25,7 +25,7 @@ extract, put `ytt` on your PATH, and keep `scripts/` beside the binary
 
 ### From source
 
-Requires Go 1.26+. Clone the repo and build so `scripts/` stays next to
+Requires Go 1.26.1+. Clone the repo and build so `scripts/` stays next to
 the binary (`ytt ingest` and `ytt synopsis` resolve that tree at
 runtime; `go install` puts only the binary in `GOBIN` and those
 subcommands then fail):
@@ -182,7 +182,7 @@ parsed as flags by the Go CLI — pass a URL in that case.
 | `YOUTUBE_INGEST_STATE_DIR` | `~/.local/state/ytt` | Where the liveness stamp lives. Kept out of the content tree. |
 | `YOUTUBE_INGEST_QUEUE` | `$YOUTUBE_INGEST_STATE_DIR/backfill.ids` | Optional extra video-ID hopper (one ID per line). Deduped against `.processed` each run and drained by the same paced workers as the playlist. |
 | `YOUTUBE_INGEST_BLURTER_BIN` | `blurter` (PATH) | The blurter binary used to report events. Pin it in scheduled runs. Download and analyze use distinct event keys, but Blurter recovery is app-scoped; a healthy download can close an analyze problem. |
-| `YOUTUBE_INGEST_REQUIRE_DAEMON` | *(unset)* | When `1`, `--analyze` dies unless `claudia broker status` succeeds. Set on the scheduled analyze job so it will not spawn providers beside the host broker. |
+| `YOUTUBE_INGEST_REQUIRE_DAEMON` | *(unset)* | When `1`, `--analyze` checks `claudia broker status` before starting. Every synopsis Task also requires the broker, including standalone `ytt synopsis` and a broker lost after this preflight. |
 | `CLAUDIA_BIN` | `claudia` (PATH) | Claudia CLI used for the host broker preflight. |
 
 ### Scheduling
@@ -284,10 +284,10 @@ not shell out to `claude -p`. The Homebrew formula declares `yt-dlp`,
 (`grok`, `claude`, `codex`) are resolved by Claudia; pin `GROK_BIN` /
 `CLAUDE_BIN` / `CODEX_BIN` in scheduled runs.
 
-When `claudia broker serve` is listening, `ytt` does not spawn provider
-processes beside it: each synopsis Task runs on the host broker socket.
-Without a broker (or with `CLAUDIA_NO_BROKER=1`) `ytt` falls back to a
-direct spawn. The scheduled analyze job requires `claudia broker status`.
+Every synopsis Task requires the host Claudia broker. If it is absent,
+disappears after preflight, or `CLAUDIA_NO_BROKER=1`, YTT fails without
+spawning a provider directly. The scheduled analyze job also checks
+`claudia broker status` before starting.
 
 The bundled launchd plists pin `ytt` and those provider binaries to
 absolute paths. A scheduled run that does not land discovered videos is
@@ -297,7 +297,7 @@ a failed run, not a successful empty tick.
 
 - Internet access to YouTube (`yt-dlp` pulls caption tracks; YouTube
   occasionally changes these and breaks fetching until yt-dlp catches up)
-- Go 1.26+ only if building from source; Homebrew and GitHub-release
+- Go 1.26.1+ only if building from source; Homebrew and GitHub-release
   downloads are a static binary plus the bundled `scripts/` tree
 - For `ytt ingest`: `yt-dlp`, `jq`, `yq`, and `timeout`/`gtimeout` on
   PATH (auto-installed via Homebrew), plus at least one Claudia

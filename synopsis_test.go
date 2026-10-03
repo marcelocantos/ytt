@@ -99,6 +99,24 @@ func testPick(provider, model string) claudia.ModelPick {
 	return claudia.ModelPick{Provider: claudia.Provider(provider), Model: model}
 }
 
+func TestSynopsisRequiresHostBroker(t *testing.T) {
+	for _, tc := range []struct {
+		name, noBroker string
+	}{
+		{name: "missing socket", noBroker: "0"},
+		{name: "direct override", noBroker: "1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CLAUDIA_NO_BROKER", tc.noBroker)
+			t.Setenv("CLAUDIA_BROKER_SOCKET", filepath.Join(t.TempDir(), "absent.sock"))
+			_, err := runClaudiaProvider(context.Background(), "grok", "grok-4.6", "Summarize this transcript", t.TempDir())
+			if !errors.Is(err, claudia.ErrBrokerRequired) {
+				t.Fatalf("runClaudiaProvider error = %v, want ErrBrokerRequired", err)
+			}
+		})
+	}
+}
+
 // generalIntel is a hermetic purpose-quality series. Scores and research
 // costs are arranged so grok-4.6/high is cheapest standard general, and
 // sonnet/high is the next remaining pick after Grok is weekly-hot.
