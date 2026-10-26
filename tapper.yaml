@@ -1,0 +1,38 @@
+# Homebrew tap publication for ytt. `tapper push` runs from the dev
+# Mac after the GitHub release exists; the token lives in the macOS
+# keychain, so there is no Actions secret and no CI step.
+repo: marcelocantos/ytt
+tap:
+  owner: marcelocantos
+  name: homebrew-tap
+push:
+  darwin_arm64: true
+  linux_amd64: true
+  linux_arm64: true
+  skip_checksum: true
+  update_readme_table: true
+install: |
+  libexec.install Dir["*"]
+  bin.install_symlink libexec/"ytt"
+test: 'assert_match "ytt #{version}", shell_output("#{bin}/ytt --version")'
+# depends_on is folded into formula_includes: tapper has no separate
+# depends_on input (homebrew-releaser renders includes at the top of the
+# class, so these lines move above desc in the generated formula).
+# coreutils supplies gtimeout, which with_timeout() needs. macOS has no
+# GNU timeout, and without it every per-call timeout AND the run
+# watchdog silently become no-ops — the exact failure mode those
+# timeouts exist to prevent (a stalled call wedging the run, and thus
+# every future scheduled run).
+# blurter is a hard dependency: ytt reports notification events to it
+# and has no notifier of its own. Declaring it means `brew install
+# ytt` yields a working alerting path rather than one that silently
+# does nothing.
+formula_includes: |
+  depends_on "coreutils"
+  depends_on "jq"
+  depends_on "marcelocantos/tap/blurter"
+  depends_on "yq"
+  depends_on "yt-dlp"
+token:
+  env: HOMEBREW_TAP_TOKEN
+  op: op://Personal/GitHub Homebrew Tap PAT/token
