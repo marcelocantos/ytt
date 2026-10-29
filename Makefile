@@ -10,6 +10,11 @@ LDFLAGS := -s -w -X main.version=$(patsubst v%,%,$(VERSION))
 
 .PHONY: all build test test-go test-scripts vet lint bullseye clean
 
+# Live broker journey uses synthetic input in an isolate, with no owner alerts.
+.PHONY: test-journey
+test-journey: build
+	YTT_LIVE=1 CLAUDIA_NO_BROKER=0 go test -count=1 -timeout 35m -run 'TestSynopsisSessionProvidersLive|TestIngestSynopsisJourneyLive' .
+
 all: vet test build
 
 build:

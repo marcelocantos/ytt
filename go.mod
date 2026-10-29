@@ -2,7 +2,7 @@ module github.com/marcelocantos/ytt
 
 go 1.26.1
 
-require github.com/marcelocantos/claudia v0.48.0
+require github.com/marcelocantos/claudia v0.76.0
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.43.3 // indirect
@@ -23,5 +23,7 @@ require (
 	github.com/aws/smithy-go v1.27.6 // indirect
 	github.com/coder/websocket v1.8.14 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/marcelocantos/sqlpipe/go/sqlpipe v0.34.0 // indirect
+	github.com/pierrec/lz4/v4 v4.1.25 // indirect
 	golang.org/x/sys v0.43.0 // indirect
 )

@@ -409,7 +409,7 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"skipping channel ingest"* ]]
     [[ "$output" != *"config was orphaned"* ]]
-    [[ "$(reported)" != *problem* ]]
+    [[ "$(reported)" != *"send problem "* ]]
 }
 
 @test "channels config resolves from XDG config dir, not the install directory" {
@@ -518,7 +518,7 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$output" != *"nothing ingested for"* ]]
-    [[ "$(reported)" != *problem* ]]
+    [[ "$(reported)" != *"send problem "* ]]
 }
 
 @test "staleness: threshold is configurable and 0 disables it" {
@@ -558,7 +558,7 @@ EOF
 
     [ "$status" -eq 0 ]
     [[ "$(reported)" == *"send ok ytt ingest healthy"* ]]
-    [[ "$(reported)" != *problem* ]]
+    [[ "$(reported)" != *"send problem "* ]]
 }
 
 @test "per-video ingest failures are alerted, not just logged" {
@@ -645,7 +645,7 @@ EOF
     [ -s "$ROOT/DLONLY-----/meta.json" ]
     [ ! -f "$ROOT/DLONLY-----/mock-synopsis-DLONLY-----.md" ]
     ! grep -Fxq -- "DLONLY-----" "$ROOT/.processed" 2>/dev/null
-    [[ "$(reported)" == *"ytt-ingest-download-ok"* ]]
+    [[ "$(reported)" == *"ytt-ingest-download-problem"* ]]
     [[ "$(reported)" != *"ytt-ingest-analyze-"* ]]
 }
 
@@ -661,7 +661,7 @@ EOF
     grep -Fxq -- "ANONLY-----" "$ROOT/.processed"
     [ -f "$ROOT/ANONLY-----/mock-synopsis-ANONLY-----.md" ]
     [ ! -d "$ROOT/SHOULDNT---" ]
-    [[ "$(reported)" == *"ytt-ingest-analyze-ok"* ]]
+    [[ "$(reported)" == *"ytt-ingest-analyze-problem"* ]]
     [[ "$(reported)" != *"ytt-ingest-download-"* ]]
 }
 
@@ -723,7 +723,7 @@ EOF
     [[ "$output" != *"UNHEALTHY"* ]]
     [[ "$output" == *"video trouble, not pipeline unhealthy"* ]]
     [[ "$(reported)" == *"send ok ytt ingest healthy"* ]]
-    [[ "$(reported)" != *problem* ]]
+    [[ "$(reported)" != *"send problem "* ]]
 
     # A retry tick that only contains the sticky ID has no successful
     # neighbour — that is the lone-miss case. Keep a new success in the

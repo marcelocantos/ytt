@@ -21,7 +21,7 @@ import (
 
 // version is overridden at build time via -ldflags "-X main.version=...".
 // The release workflow verifies it against the tag.
-var version = "0.17.0"
+var version = "0.18.0"
 
 //go:embed agents-guide.md
 var embedded embed.FS
@@ -50,6 +50,8 @@ VIDEO may be a video ID or any YouTube URL (watch?v=, youtu.be/, /shorts/,
   ytt build-index    regenerate the knowledge-base index from synopsis files
   ytt synopsis --dir DIR --title TITLE --url URL
                      write a background synopsis via Claudia Resolve (analysis purpose, standard floor, one pick)
+  ytt synopsis --check
+                     check host broker compatibility and background admission without starting a session
 `
 
 func main() {
@@ -67,6 +69,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	if len(args) > 0 && args[0] == "synopsis" {
 		return cmdSynopsis(args[1:], stdout, stderr)
+	}
+	if len(args) > 0 && args[0] == "ingest-control" {
+		return cmdIngestControl(args[1:], os.Stdin, stdout, stderr)
 	}
 
 	fs := flag.NewFlagSet("ytt", flag.ContinueOnError)

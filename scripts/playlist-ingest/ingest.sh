@@ -244,6 +244,7 @@ collect_pending_analyze() {
 # no way to add a failure mode that fails the run without also alerting.
 ISSUES=()
 SPEND_LIMITED=false
+DOWNLOAD_DEFERRED=false
 note_issue() {
     ISSUES+=("$*")
     log "UNHEALTHY: $*"
@@ -274,12 +275,14 @@ notify() {
     # underlying problem does not, and blurter would otherwise treat every run
     # as a fresh problem and alert nightly. STAGE is part of the key so a
     # healthy download tick cannot recover (or hide) an analyze problem.
+    # Keep the historical problem key for both verdicts so an old outstanding
+    # problem can recover after upgrade; severity must never change the key.
     # SC2094: --link only passes $LOG's path as an argument; nothing reads the
     # file here, so writing to it in the same pipeline is safe.
     # shellcheck disable=SC2094
     if ! printf '%s\n' "$@" \
             | "$BLURTER_BIN" send --app ytt --severity "$severity" \
-                --subject "$subject" --body - --key "ytt-ingest-$STAGE-$severity" \
+                --subject "$subject" --body - --key "ytt-ingest-$STAGE-problem" \
                 --link "$LOG" --quiet >>"$LOG" 2>&1; then
         log "reporting to blurter failed (see $LOG); continuing"
     fi
@@ -343,6 +346,35 @@ if [[ "$STAGE" != download ]]; then
     fi
 fi
 export YOUTUBE_INGEST_YTT_BIN="$YTT_BIN"
+
+# The Go helper owns the shared cooldown; the shell only routes its verdict.
+if [[ "$STAGE" != analyze ]] && ! $DRY_RUN; then
+    cooldown_rc=0
+    cooldown=$("$YTT_BIN" ingest-control download-ready 2>&1) || cooldown_rc=$?
+    case "$cooldown_rc" in
+        0) ;;
+        75)
+            log "$cooldown"
+            if [[ "$STAGE" == download ]]; then exit 0; fi
+            DOWNLOAD_DEFERRED=true
+            STAGE=analyze
+            ;;
+        *) die "download cooldown check failed: $cooldown" ;;
+    esac
+fi
+if [[ "$STAGE" != download ]] && ! $DRY_RUN; then
+    admission_rc=0
+    admission=$("$YTT_BIN" synopsis --check 2>&1) || admission_rc=$?
+    case "$admission_rc" in
+        0) ;;
+        255)
+            log "analysis deferred (synopsis providers at capacity): $admission"
+            if [[ "$STAGE" == analyze ]]; then exit 0; fi
+            SPEND_LIMITED=true
+            ;;
+        *) die "synopsis preflight failed; backlog not dispatched: $admission" ;;
+    esac
+fi
 
 # --- bash 3.2 compatibility ------------------------------------------------
 # macOS ships bash 3.2.57 (Apple froze it at the last GPLv2 release) and this
@@ -749,7 +781,7 @@ finish() {
     fi
     # Capacity is an expected pause, not a recovery. Keep the backlog visible
     # in the log without sending a problem or a misleading healthy event.
-    if $SPEND_LIMITED; then
+    if $SPEND_LIMITED || $DOWNLOAD_DEFERRED; then
         exit 0
     fi
     notify ok "ytt ingest healthy: $summary" "$summary"
@@ -819,6 +851,13 @@ if [[ "$STAGE" != analyze ]] && (( ${#TO_DOWNLOAD[@]} > 0 )); then
     printf '%s\n' "${TO_DOWNLOAD[@]}" \
         | with_timeout "$RUN_TIMEOUT" xargs -n 1 -P "$CONCURRENCY" "$HERE/ingest-one.sh" --download -- \
         || download_rc=$?
+    cooldown_rc=0
+    cooldown=$("$YTT_BIN" ingest-control download-ready 2>&1) || cooldown_rc=$?
+    case "$cooldown_rc" in
+        0) ;;
+        75) DOWNLOAD_DEFERRED=true; download_rc=0; log "$cooldown" ;;
+        *) note_issue "download cooldown check failed: $cooldown" ;;
+    esac
     if (( download_rc == 124 )); then
         log "run watchdog: download fan-out exceeded ${RUN_TIMEOUT}s — terminated; unfinished fetches retry next tick"
         note_issue "download watchdog fired: the fan-out exceeded ${RUN_TIMEOUT}s and was terminated"
@@ -839,7 +878,9 @@ if [[ "$STAGE" != analyze ]] && (( ${#TO_DOWNLOAD[@]} > 0 )); then
     if (( PERM_FAIL > 0 )); then
         log "recorded $PERM_FAIL undownloadable id(s); skipped on later ticks"
     fi
-    if (( DOWNLOAD_FAILED > 0 )) && (( download_rc != 124 )); then
+    if $DOWNLOAD_DEFERRED; then
+        log "$DOWNLOAD_FAILED downloads deferred after YouTube throttling; retry after cooldown"
+    elif (( DOWNLOAD_FAILED > 0 )) && (( download_rc != 124 )); then
         # Isolated misses (sticky livestream, one-ID 429) are video trouble,
         # not pipeline trouble, when this tick also completed fetches. Page
         # only when failures outnumber successes, or nothing succeeded —
@@ -857,13 +898,16 @@ if [[ "$STAGE" != analyze ]] && (( ${#TO_DOWNLOAD[@]} > 0 )); then
     if (( DOWNLOAD_FAILED == 0 )) && (( download_rc != 124 )); then
         download_rc=0
     fi
+    if (( DOWNLOADED > 0 )) && ! $DOWNLOAD_DEFERRED; then
+        "$YTT_BIN" ingest-control download-succeeded >>"$LOG" 2>&1 || note_issue "could not clear download cooldown"
+    fi
 fi
 
 # Analyze everything now on disk, including this tick's downloads.
 # Not YouTube-throttled. Capacity 255 stops the analyze fan-out only.
 INGESTED=0
 analyze_rc=0
-if [[ "$STAGE" != download ]]; then
+if [[ "$STAGE" != download ]] && ! $SPEND_LIMITED; then
     collect_pending_analyze
     if (( ${#PENDING_ANALYZE[@]} > 0 )); then
         log "analyzing ${#PENDING_ANALYZE[@]} videos"

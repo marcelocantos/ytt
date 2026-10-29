@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to rebuild (e.g., v0.2.0)"
+        description: "Version to verify in a dry run (e.g., v0.18.0; no upload)"
         required: true
         type: string
 
@@ -28,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          ref: ${{ github.event.release.tag_name || github.ref }}
 
       - uses: actions/setup-go@v6
         with:
@@ -53,9 +53,9 @@ jobs:
         run: |
           version="${TAG#v}"
           mkdir -p dist/ytt
-          # CGO_ENABLED=0 gives a static binary and makes every target
-          # cross-compilable; ytt has no C dependencies.
-          CGO_ENABLED=0 go build -trimpath \
+          # Claudia's plan-usage reader embeds sqlpipe (C/C++23). Each
+          # matrix entry builds natively rather than cross-compiling CGO.
+          CGO_ENABLED=1 go build -trimpath \
             -ldflags "-s -w -X main.version=$version" -o dist/ytt/ytt .
           ./dist/ytt/ytt --version
 
@@ -76,7 +76,7 @@ jobs:
           name="ytt-${version}-${{ matrix.target }}"
           # Tarball contents are the *contents* of dist/ytt — the `ytt` binary
           # at the root plus the bundled `scripts/` tree. There is no longer an
-          # `_internal` directory: the Go build is a single static binary, where
+          # `_internal` directory: the Go build is a single binary, where
           # the PyInstaller --onedir bundle needed its interpreter and deps
           # shipped alongside. The formula still moves everything into libexec
           # and symlinks the binary into bin.
@@ -84,6 +84,7 @@ jobs:
           shasum -a 256 "${name}.tar.gz"
 
       - name: Upload to release
+        if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.event.release.tag_name || inputs.tag }}

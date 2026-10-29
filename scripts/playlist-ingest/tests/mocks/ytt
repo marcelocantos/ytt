@@ -22,6 +22,14 @@ fi
 # the old claude mock used, so ingest-one.bats stays stable.
 if [[ "${1:-}" == synopsis ]]; then
     shift
+    if [[ "${1:-}" == --check ]]; then
+        if [[ -n "${MOCK_SYNOPSIS_PREFLIGHT_FAIL:-}" ]]; then
+            echo 'broker protocol incompatible' >&2
+            exit 1
+        fi
+        if [[ -n "${MOCK_SYNOPSIS_PREFLIGHT_CAPACITY:-}" ]]; then exit 255; fi
+        exit 0
+    fi
     DIR=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -34,6 +42,10 @@ if [[ "${1:-}" == synopsis ]]; then
         exit 2
     fi
     ID="$(basename "$DIR")"
+    if [[ -n "${MOCK_SYNOPSIS_BACKEND_FAIL:-}" ]]; then
+        echo 'synopsis backend unavailable: broker disappeared' >&2
+        exit 254
+    fi
     if [[ ",${MOCK_CLAUDE_FAIL:-}," == *",$ID,"* ]]; then
         echo "mock ytt synopsis: forced failure for $ID" >&2
         exit 1
@@ -72,7 +84,7 @@ fi
 # `build-index` is a real subcommand with no network access, so forward it to
 # the actual binary rather than faking it: the ingest tests assert on the index
 # file it writes, and a stub would make those assertions meaningless.
-if [[ "${1:-}" == "build-index" ]]; then
+if [[ "${1:-}" == "build-index" || "${1:-}" == "ingest-control" ]]; then
     exec "${YTT_GO_BIN:?ytt mock needs YTT_GO_BIN}" "$@"
 fi
 
@@ -84,6 +96,11 @@ for arg in "$@"; do
 done
 id="${URL##*watch?v=}"
 id="${id%%&*}"
+
+if [[ ",${MOCK_YTT_RATE_LIMIT:-}," == *",$id,"* ]]; then
+    echo "ytt: $id: HTTP Error 429: Too Many Requests" >&2
+    exit 1
+fi
 
 if [[ ",${MOCK_YTT_FAIL:-}," == *",$id,"* ]]; then
     echo "mock ytt: forced failure for $id" >&2

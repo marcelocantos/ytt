@@ -16,7 +16,8 @@ Usage:
   ytt build-index                  regenerate youtube-knowledge-base.md (recent uploads)
   ytt synopsis --dir DIR --title T --url URL
                                    write one synopsis via Claudia
-                                   (Resolve: background Task + plan + analysis purpose + standard floor)
+                                   (Resolve: background Session + plan + analysis purpose + standard floor)
+  ytt synopsis --check             verify host broker and background admission without starting a session
 
 Accepted input forms:
   dQw4w9WgXcQ                      raw 11-character video ID
@@ -43,6 +44,7 @@ Exit codes:
   0   all requested transcripts fetched successfully
   1   at least one video failed (unavailable, transcripts disabled, etc.)
   2   usage error (no arguments, bad flag)
+  254 synopsis backend unavailable; ingest stops the batch and reports one problem
   255 synopsis providers at capacity; no agent created, so ingest defers the video
 
 Agent tips:
@@ -73,7 +75,10 @@ Agent tips:
     and pending queue without fetching or spending.
   - `$ROOT/.download-failed` records only genuine YouTube dead-ends (no
     captions, members-only, private/unavailable). Transient IO, empty
-    stderr, 429, and timeouts retry and do not poison the ID. Members-only
+    stderr and timeouts retry and do not poison the ID. HTTP 429 stops the
+    batch and persists a shared 6-hour cooldown, then 12 and at most 24 hours
+    if throttling persists. Deferred ticks emit no problem or recovery.
+    Members-only
     (`subscriber_only` and kin) is skipped at listing so it never takes a
     paced download slot.
   - Video IDs may start with `-`. `ytt ingest` accepts them as operands.

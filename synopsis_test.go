@@ -292,6 +292,9 @@ func TestCmdSynopsisCapacityExit255(t *testing.T) {
 }
 
 func TestCmdSynopsisUnusableReplyExit1(t *testing.T) {
+	origLoad := loadSynopsisPlanUsage
+	t.Cleanup(func() { loadSynopsisPlanUsage = origLoad })
+	loadSynopsisPlanUsage = func(context.Context) ([]claudia.PlanUsage, error) { return nil, nil }
 	restore := runSynopsisProvider
 	t.Cleanup(func() { runSynopsisProvider = restore })
 	runSynopsisProvider = func(_ context.Context, _, _, _, _ string) (string, error) {
@@ -314,6 +317,29 @@ func TestCmdSynopsisUnusableReplyExit1(t *testing.T) {
 	}, &out, &errb)
 	if code != 1 {
 		t.Fatalf("exit %d, want 1 (per-video fail, not 255 queue abort) stderr=%s", code, errb.String())
+	}
+}
+
+func TestSynopsisPreflightChecksAdmissionWithoutRunningProvider(t *testing.T) {
+	origLoad, origResolve, origRun := loadSynopsisPlanUsage, resolveSynopsis, runSynopsisProvider
+	t.Cleanup(func() { loadSynopsisPlanUsage, resolveSynopsis, runSynopsisProvider = origLoad, origResolve, origRun })
+	loadSynopsisPlanUsage = func(context.Context) ([]claudia.PlanUsage, error) { return nil, nil }
+	resolveSynopsis = func(_ context.Context, pred claudia.ModelPredicates) (claudia.ModelPick, error) {
+		if pred.Mode != claudia.CapabilitySession || !pred.Background {
+			t.Fatalf("wrong admission predicates: %+v", pred)
+		}
+		return testPick("codex", "gpt-6-sol"), nil
+	}
+	runSynopsisProvider = func(context.Context, string, string, string, string) (string, error) {
+		t.Fatal("preflight started a provider")
+		return "", nil
+	}
+	var stdout, stderr bytes.Buffer
+	if code := cmdSynopsis([]string{"--check"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d: %s", code, &stderr)
+	}
+	if !strings.Contains(stdout.String(), "codex/gpt-6-sol") {
+		t.Fatalf("missing resolved pick: %s", &stdout)
 	}
 }
 

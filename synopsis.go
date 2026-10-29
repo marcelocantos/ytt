@@ -32,6 +32,10 @@ type providerRun func(ctx context.Context, provider, model, prompt, workDir stri
 
 var runSynopsisProvider providerRun = runClaudiaProvider
 
+var errSynopsisBackend = errors.New("synopsis backend unavailable")
+
+const synopsisBackendExit = 254
+
 type capacityError struct {
 	Provider string
 	Msg      string
@@ -48,14 +52,30 @@ func cmdSynopsis(args []string, stdout, stderr io.Writer) int {
 	title := fs.String("title", "", "video title")
 	url := fs.String("url", "", "YouTube URL")
 	providersFlag := fs.String("providers", "", "optional Claudia provider preference or allowlist (not a fallback ladder)")
+	check := fs.Bool("check", false, "check background model admission without starting a session")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if *dir == "" || *title == "" || *url == "" {
+	if !*check && (*dir == "" || *title == "" || *url == "") {
 		fmt.Fprintln(stderr, "ytt: synopsis requires --dir, --title, and --url")
 		return 2
 	}
 
+	if *check {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		pick, err := resolveSynopsisPick(ctx, *providersFlag)
+		if err != nil {
+			fmt.Fprintf(stderr, "ytt: synopsis preflight: %v\n", err)
+			var cap *capacityError
+			if errors.As(err, &cap) {
+				return 255
+			}
+			return 1
+		}
+		fmt.Fprintln(stdout, formatSynopsisPick(pick))
+		return 0
+	}
 	contract, err := loadSynopsisContract()
 	if err != nil {
 		fmt.Fprintf(stderr, "ytt: synopsis: %v\n", err)
@@ -69,7 +89,7 @@ func cmdSynopsis(args []string, stdout, stderr io.Writer) int {
 		if errors.As(err, &cap) {
 			return 255
 		}
-		return 1
+		return synopsisBackendExit
 	}
 	fmt.Fprintf(stderr, "ytt: synopsis: resolve %s\n", formatSynopsisPick(pick))
 
@@ -79,6 +99,9 @@ func cmdSynopsis(args []string, stdout, stderr io.Writer) int {
 		var cap *capacityError
 		if errors.As(err, &cap) {
 			return 255
+		}
+		if errors.Is(err, errSynopsisBackend) {
+			return synopsisBackendExit
 		}
 		return 1
 	}
@@ -94,7 +117,7 @@ func cmdSynopsis(args []string, stdout, stderr io.Writer) int {
 }
 
 // resolveSynopsis is the 🎯T61.5 seam. Claudia Resolve picks one
-// (generation, effort) pair from purpose-quality predicates (Task +
+// (generation, effort) pair from purpose-quality predicates (Session +
 // plan + analysis purpose + standard floor + token availability).
 // Missing analysis series yields to general inside Claudia. ytt does
 // not name a vendor and does not walk a host ladder.
@@ -109,6 +132,9 @@ func defaultResolveSynopsis(ctx context.Context, pred claudia.ModelPredicates) (
 var loadSynopsisPlanUsage = defaultLoadSynopsisPlanUsage
 
 func defaultLoadSynopsisPlanUsage(ctx context.Context) ([]claudia.PlanUsage, error) {
+	if !claudia.BrokerAvailable() {
+		return nil, claudia.ErrBrokerRequired
+	}
 	return claudia.LoadPlanUsage(ctx, &claudia.PlanUsageCacheArgs{})
 }
 
@@ -133,7 +159,7 @@ func resolveSynopsisPick(ctx context.Context, flagVal string) (claudia.ModelPick
 		usage = []claudia.PlanUsage{}
 	}
 	pred := claudia.ModelPredicates{
-		Mode:             claudia.CapabilityTask,
+		Mode:             claudia.CapabilitySession,
 		Purpose:          claudia.ModelPurposeAnalysis,
 		Quality:          claudia.ModelQualityStandard,
 		PreferPlan:       true,
@@ -419,47 +445,28 @@ func runClaudiaProvider(ctx context.Context, provider, model, prompt, workDir st
 	if err != nil {
 		return "", err
 	}
-	cfg := claudia.TaskConfig{
-		ID:            "ytt-synopsis",
-		Provider:      p,
-		Model:         model,
-		WorkDir:       workDir,
-		RequireBroker: true,
+	// Only the host starts the session. Its read-only tools confine
+	// untrusted transcript instructions; YTT writes the returned synopsis.
+	agent, err := claudia.StartBrokerContext(ctx, claudia.Config{
+		Provider: p, Model: model, WorkDir: workDir,
+		SandboxMode: "read-only", ApprovalPolicy: "never", MCPExclusive: true,
+	})
+	if err != nil {
+		if isCapacityText(err.Error()) {
+			return "", &capacityError{Provider: provider, Msg: err.Error()}
+		}
+		return "", fmt.Errorf("%w: %w", errSynopsisBackend, err)
 	}
-	switch p {
-	case claudia.ProviderClaude:
-		// Transcript is untrusted input. Strip write/shell/network tools
-		// and take the synopsis from stdout; ytt writes the file.
-		cfg.DisallowTools = []string{"Bash", "Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch"}
-	case claudia.ProviderCodex:
-		cfg.SandboxMode = "workspace-write"
-		cfg.ApprovalPolicy = "never"
+	defer agent.Stop()
+	if err := agent.Send(prompt); err != nil {
+		return "", fmt.Errorf("%w: %w", errSynopsisBackend, err)
 	}
-	task := claudia.NewTask(cfg)
-	events, err := task.Run(ctx, prompt)
+	result, err := agent.WaitForResponse(ctx)
 	if err != nil {
 		if isCapacityText(err.Error()) {
 			return "", &capacityError{Provider: provider, Msg: err.Error()}
 		}
 		return "", err
-	}
-	var result, errMsg string
-	for ev := range events {
-		switch ev.Type {
-		case claudia.TaskEventResult:
-			result = ev.Content
-		case claudia.TaskEventError:
-			errMsg = ev.ErrorMsg
-			if errMsg == "" {
-				errMsg = ev.Content
-			}
-		}
-	}
-	if errMsg != "" {
-		if isCapacityText(errMsg) {
-			return "", &capacityError{Provider: provider, Msg: errMsg}
-		}
-		return "", errors.New(errMsg)
 	}
 	if strings.TrimSpace(result) == "" {
 		return "", errors.New("empty result")
@@ -469,12 +476,8 @@ func runClaudiaProvider(ctx context.Context, provider, model, prompt, workDir st
 
 func claudiaProvider(name string) (claudia.Provider, error) {
 	switch name {
-	case "grok":
-		return claudia.ProviderGrok, nil
-	case "claude":
-		return claudia.ProviderClaude, nil
-	case "codex":
-		return claudia.ProviderCodex, nil
+	case "grok", "xai-oauth", "claude", "anthropic", "codex", "openai-codex":
+		return claudia.Provider(name), nil
 	case "cursor":
 		return claudia.ProviderCursor, nil
 	default:

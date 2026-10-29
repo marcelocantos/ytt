@@ -164,13 +164,25 @@ do_download() {
     max_attempts="${YOUTUBE_INGEST_FETCH_RETRIES:-3}"
     while :; do
         mkdir -p "$DIR/.transcript"
+        cooldown_rc=0
+        "$YTT_BIN" ingest-control download-ready >>"$LOG" 2>&1 || cooldown_rc=$?
+        if (( cooldown_rc == 75 )); then exit 255; fi
+        if (( cooldown_rc != 0 )); then exit "$cooldown_rc"; fi
         throttle
+        cooldown_rc=0
+        "$YTT_BIN" ingest-control download-ready >>"$LOG" 2>&1 || cooldown_rc=$?
+        if (( cooldown_rc == 75 )); then exit 255; fi
+        if (( cooldown_rc != 0 )); then exit "$cooldown_rc"; fi
         rc=0
         err=$(with_timeout 120 "$YTT_BIN" --json "$URL" 2>&1 >"$RAW") || rc=$?
         if (( rc == 0 )); then
             break
         fi
         printf '%s\n' "$err" >>"$LOG"
+        cooldown_rc=0
+        printf '%s\n' "$err" | "$YTT_BIN" ingest-control download-failure >>"$LOG" 2>&1 || cooldown_rc=$?
+        if (( cooldown_rc == 75 )); then exit 255; fi
+        if (( cooldown_rc != 0 )); then exit "$cooldown_rc"; fi
         attempt=$((attempt + 1))
         if youtube_dead_end "$err"; then
             fail_download "$err" "ytt failed (rc=$rc): YouTube dead-end"
@@ -192,6 +204,10 @@ do_download() {
                duration, view_count, description, webpage_url, tags}' \
         >"$DIR/meta.json"; then
         cat "$META_ERR" >>"$LOG" 2>/dev/null || true
+        cooldown_rc=0
+        "$YTT_BIN" ingest-control download-failure <"$META_ERR" >>"$LOG" 2>&1 || cooldown_rc=$?
+        if (( cooldown_rc == 75 )); then exit 255; fi
+        if (( cooldown_rc != 0 )); then exit "$cooldown_rc"; fi
         fail_download "$(cat "$META_ERR" 2>/dev/null || true)" "meta fetch failed"
     fi
     rm -f "$META_ERR"
@@ -230,6 +246,10 @@ do_analyze() {
         if (( rc == 255 )); then
             : > "$ROOT/.spend-limit"
             log "synopsis model at capacity; aborting analyze so the rest defers (exit 255 stops xargs)"
+            exit 255
+        fi
+        if (( rc == 254 )); then
+            log "synopsis backend unavailable; stopping the batch, downloads kept for retry"
             exit 255
         fi
         log "synopsis failed; download kept for retry"

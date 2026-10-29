@@ -16,7 +16,7 @@ brew install marcelocantos/tap/ytt
 
 ### From the GitHub release
 
-Each release attaches a static Go binary plus the bundled `scripts/`
+Each release attaches a native Go binary plus the bundled `scripts/`
 tree for macOS arm64, Linux x86_64, and Linux arm64. Download the
 tarball matching your platform from the
 [releases page](https://github.com/marcelocantos/ytt/releases/latest),
@@ -151,8 +151,13 @@ $YOUTUBE_INGEST_ROOT/
 `.download-failed` is a skip ledger, not a dump of every fetch error. Only
 genuine YouTube dead-ends are recorded: no captions (`TranscriptsDisabled` /
 `NoTranscriptFound`), members-only / unplayable, private, or
-`VideoUnavailable`. IO races (`No such file`), empty stderr, 429s, and
-timeouts retry on the next download tick and do not poison the ID.
+`VideoUnavailable`. IO races (`No such file`), empty stderr, and timeouts
+retry on the next download tick and do not poison the ID. HTTP 429 stops
+the batch and pauses downloads for six hours, then twelve and at most
+twenty-four hours if throttling persists. Workers and future ticks share
+the persisted cooldown; a successful resumed batch resets it. These
+deferrals emit no unhealthy or recovery event. Already-downloaded videos
+can still be analyzed while downloads are paused.
 
 Members-only videos (`subscriber_only`, `unlisted_subscriber_only`,
 `premium_only`, `needs_auth`, `private`) are skipped at listing time — they
@@ -174,18 +179,23 @@ parsed as flags by the Go CLI — pass a URL in that case.
 | `YOUTUBE_INGEST_ANALYZE_CONCURRENCY` | same as download | Parallel analyze workers (no YouTube pacing). |
 | `YOUTUBE_INGEST_DOWNLOAD_BATCH` | `16` | Max videos fetched per download tick. Remainder waits for the next tick. `0` disables. |
 | `YOUTUBE_INGEST_YTT_BIN` | `ytt` (PATH) | Absolute path to the `ytt` used for transcript fetches and `ytt synopsis`. Pin it in scheduled runs so launchd and your shell can't resolve two different builds. |
-| `YOUTUBE_INGEST_SYNOPSIS_PROVIDERS` | *(unset)* | Optional Claudia preference (`grok`) or allowlist (`claude,codex`). Unset, `ytt` calls `Resolve` once (Task, plan, **background**, **analysis** purpose, **standard** quality floor) and runs that pick — generation and effort are Resolve outputs, not host pins. Claudia v0.43+ excludes orange/red providers for background work even when preferred; if no eligible model remains, synopsis exits 255 without creating an agent. Missing analysis intel yields to general. This is not a fallback ladder. If no purpose-quality series exists yet, Resolve falls back to the catalog shelf. |
+| `YOUTUBE_INGEST_SYNOPSIS_PROVIDERS` | *(unset)* | Optional Claudia preference (`grok`) or allowlist (`claude,codex`). Unset, `ytt` calls `Resolve` once (Session, plan, **background**, **analysis** purpose, **standard** quality floor) and runs that pick — generation and effort are Resolve outputs, not host pins. Claudia excludes orange/red providers for background work even when preferred; if no eligible model remains, synopsis exits 255 without creating an agent. Missing analysis intel yields to general. This is not a fallback ladder. If no purpose-quality series exists yet, Resolve falls back to the catalog shelf. |
 | `YOUTUBE_INGEST_LOG` | `$YOUTUBE_INGEST_ROOT/.ingest.log` | Ingest log path. Point it outside the content tree for scheduled runs. |
 | `YOUTUBE_INGEST_NETWORK_WAIT` | `14400` | Seconds to wait (awake-time) for connectivity before giving up — covers launchd ticks that fire in a no-network DarkWake window. |
 | `YOUTUBE_INGEST_STALE_DAYS` | `7` | Days of zero ingests (with channels tracked) before the run is judged unhealthy. `0` disables the check. |
 | `YOUTUBE_INDEX_RECENT_DAYS` | `7` | `ytt build-index` includes only videos whose YouTube upload date is on or after today minus this many days. `0` lists the full catalog. Older synopses stay on disk. |
 | `YOUTUBE_INGEST_STATE_DIR` | `~/.local/state/ytt` | Where the liveness stamp lives. Kept out of the content tree. |
 | `YOUTUBE_INGEST_QUEUE` | `$YOUTUBE_INGEST_STATE_DIR/backfill.ids` | Optional extra video-ID hopper (one ID per line). Deduped against `.processed` each run and drained by the same paced workers as the playlist. |
-| `YOUTUBE_INGEST_BLURTER_BIN` | `blurter` (PATH) | The blurter binary used to report events. Pin it in scheduled runs. Download and analyze use distinct event keys, but Blurter recovery is app-scoped; a healthy download can close an analyze problem. |
-| `YOUTUBE_INGEST_REQUIRE_DAEMON` | *(unset)* | When `1`, `--analyze` checks `claudia broker status` before starting. Every synopsis Task also requires the broker, including standalone `ytt synopsis` and a broker lost after this preflight. |
+| `YOUTUBE_INGEST_BLURTER_BIN` | `blurter` (PATH) | The blurter binary used to report events. Pin it in scheduled runs. Download and analyze use distinct keys shared by their problem and recovery reports; use a Blurter build with independent per-key state. |
+| `YOUTUBE_INGEST_REQUIRE_DAEMON` | *(unset)* | When `1`, `--analyze` checks `claudia broker status` before starting. Every synopsis Session also requires the broker, including standalone `ytt synopsis` and a broker lost after this preflight. |
 | `CLAUDIA_BIN` | `claudia` (PATH) | Claudia CLI used for the host broker preflight. |
 
 ### Scheduling
+
+Analyze checks `ytt synopsis --check` once before dispatching its backlog.
+An incompatible or unavailable broker therefore produces one run failure,
+not one failed provider attempt per video. Capacity exhaustion quietly defers
+the tick. A backend lost after preflight stops further dispatch as well.
 
 Two launchd jobs: a paced **download** tick every 20 minutes and an
 unthrottled **analyze** tick every 10 minutes. They run whenever the
@@ -254,7 +264,7 @@ event:
 - a discovery source failed (playlist or channel feed)
 - a channels config was orphaned (see above)
 - downloading itself is failing this tick (pending misses outnumber successful fetches, or nothing succeeded), or the run watchdog fired. A single ID that stays pending while neighbours download is video trouble, logged and retried, not an unhealthy run
-- Claudia Resolve finds no token-eligible model, or the chosen model hits a capacity/spend/rate limit (`ytt synopsis` exit 255), so the analyze tick cut short; an unusable or empty reply fails that video only (exit 1) and does not abort the queue
+- the host broker is unavailable or incompatible, or a Session cannot start; the analyze tick stops before retrying the entire queue
 - the knowledge-base index failed to refresh
 - **nothing has been ingested for `YOUTUBE_INGEST_STALE_DAYS` days** while
   channels are tracked — the liveness backstop for "every step succeeded and yet
@@ -262,6 +272,11 @@ event:
 
 A healthy run reports an `ok` event, which blurter keeps silent unless it closes
 out a problem it previously reported.
+
+Exhausted model capacity and YouTube HTTP 429 are quiet deferrals, not unhealthy
+runs. Capacity stops analysis without a problem or false recovery; HTTP 429
+persists a shared download cooldown of 6, 12, then at most 24 hours. An unusable
+or empty synopsis reply fails that video only and does not abort the queue.
 
 `blurter send` spools and exits, so reporting never blocks the ingest and never
 fails it, and an alert raised while the machine is offline is still delivered
@@ -284,7 +299,7 @@ not shell out to `claude -p`. The Homebrew formula declares `yt-dlp`,
 (`grok`, `claude`, `codex`) are resolved by Claudia; pin `GROK_BIN` /
 `CLAUDE_BIN` / `CODEX_BIN` in scheduled runs.
 
-Every synopsis Task requires the host Claudia broker. If it is absent,
+Every synopsis Session requires the host Claudia broker. If it is absent,
 disappears after preflight, or `CLAUDIA_NO_BROKER=1`, YTT fails without
 spawning a provider directly. The scheduled analyze job also checks
 `claudia broker status` before starting.
@@ -298,7 +313,7 @@ a failed run, not a successful empty tick.
 - Internet access to YouTube (`yt-dlp` pulls caption tracks; YouTube
   occasionally changes these and breaks fetching until yt-dlp catches up)
 - Go 1.26.1+ only if building from source; Homebrew and GitHub-release
-  downloads are a static binary plus the bundled `scripts/` tree
+  downloads are a native binary plus the bundled `scripts/` tree
 - For `ytt ingest`: `yt-dlp`, `jq`, `yq`, and `timeout`/`gtimeout` on
   PATH (auto-installed via Homebrew), plus at least one Claudia
   provider CLI for synopsis generation
