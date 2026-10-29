@@ -18,7 +18,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: macos-14
+          - os: macos-15
             target: darwin-arm64
           - os: ubuntu-latest
             target: linux-amd64
@@ -53,6 +53,7 @@ jobs:
         run: |
           version="${TAG#v}"
           mkdir -p dist/ytt
+          test "$(go env GOOS)-$(go env GOARCH)" = "${{ matrix.target }}"
           # Claudia's plan-usage reader embeds sqlpipe (C/C++23). Each
           # matrix entry builds natively rather than cross-compiling CGO.
           CGO_ENABLED=1 go build -trimpath \
